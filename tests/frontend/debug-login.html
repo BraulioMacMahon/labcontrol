@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LabControl - Debug Login</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        .container {
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            max-width: 600px;
+            width: 100%;
+            padding: 40px;
+        }
+        h1 { color: #333; margin-bottom: 10px; }
+        .subtitle { color: #666; margin-bottom: 30px; }
+        .form-group { margin-bottom: 20px; }
+        label { display: block; color: #333; font-weight: 600; margin-bottom: 8px; }
+        input[type="text"],
+        input[type="email"],
+        input[type="password"] {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+        input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        button {
+            width: 100%;
+            padding: 12px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        button:active { transform: scale(0.98); }
+        .output {
+            background: #f5f5f5;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            padding: 15px;
+            margin-top: 20px;
+            max-height: 400px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            color: #333;
+        }
+        .log-entry {
+            margin: 5px 0;
+            padding: 5px;
+            border-left: 3px solid #ccc;
+            padding-left: 10px;
+        }
+        .log-entry.success { border-left-color: #27ae60; color: #27ae60; }
+        .log-entry.error { border-left-color: #e74c3c; color: #e74c3c; }
+        .log-entry.info { border-left-color: #3498db; color: #3498db; }
+        .clear-btn {
+            background: #95a5a6;
+            margin-top: 10px;
+            width: auto;
+            padding: 8px 15px;
+        }
+        .logout-btn {
+            background: linear-gradient(135deg, #e67e22 0%, #d35400 100%);
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔐 Debug Login LabControl</h1>
+        <p class="subtitle">Teste de conectividade e autenticação</p>
+        
+        <div class="form-group">
+            <label for="email">Email:</label>
+            <input type="email" id="email" value="admin@labcontrol.local" placeholder="Email">
+        </div>
+        
+        <div class="form-group">
+            <label for="password">Senha:</label>
+            <input type="password" id="password" value="admin123" placeholder="Senha">
+        </div>
+        
+        <div class="form-group">
+            <label for="baseUrl">URL Base da API:</label>
+            <input type="text" id="baseUrl" value="http://localhost/labcontrol/labcontrol-backend/api" placeholder="URL da API">
+        </div>
+        
+        <button onclick="testLogin()">🚀 Testar Login</button>
+        <button class="logout-btn" onclick="testLogout()">🚪 Testar Logout</button>
+        <button class="clear-btn" onclick="clearLog()">🗑️ Limpar Log</button>
+        
+        <div class="output" id="output">
+            <div class="log-entry info">Pronto para testar...</div>
+        </div>
+    </div>
+
+    <script>
+        const output = document.getElementById('output');
+        const logs = [];
+        let currentToken = localStorage.getItem('debug_token') || null;
+        
+        function addLog(message, type = 'info') {
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            output.appendChild(entry);
+            output.scrollTop = output.scrollHeight;
+            logs.push({ message, type, time: new Date().toLocaleTimeString() });
+        }
+        
+        function clearLog() {
+            output.innerHTML = '<div class="log-entry info">Log limpo</div>';
+            logs.length = 0;
+        }
+        
+        async function testLogin() {
+            clearLog();
+            
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+            const baseUrl = document.getElementById('baseUrl').value;
+            
+            if (!email || !password || !baseUrl) {
+                addLog('❌ Preencha todos os campos', 'error');
+                return;
+            }
+            
+            addLog(`📧 Email: ${email}`, 'info');
+            addLog(`🔒 Senha: ${'*'.repeat(password.length)}`, 'info');
+            addLog(`🔗 URL: ${baseUrl}`, 'info');
+            addLog('---', 'info');
+            
+            try {
+                addLog('1️⃣ Iniciando teste de conectividade...', 'info');
+                
+                const url = `${baseUrl}/auth.php?action=login`;
+                addLog(`POST ${url}`, 'info');
+                
+                addLog('2️⃣ Enviando requisição...', 'info');
+                
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    },
+                    body: JSON.stringify({ email, password })
+                });
+                
+                addLog(`Status HTTP: ${response.status} ${response.statusText}`, response.status === 200 ? 'success' : 'error');
+                
+                const data = await response.json();
+                
+                addLog('3️⃣ Resposta recebida:', 'info');
+                addLog(JSON.stringify(data, null, 2), data.success ? 'success' : 'error');
+                
+                if (data.success) {
+                    addLog('✅ LOGIN BEM-SUCEDIDO!', 'success');
+                    currentToken = data.data.token;
+                    localStorage.setItem('debug_token', currentToken);
+                    addLog(`Token salvo: ${currentToken.substring(0, 30)}...`, 'success');
+                    addLog(`Usuário: ${data.data.user.email}`, 'success');
+                } else {
+                    addLog(`❌ Falha no Login: ${data.message}`, 'error');
+                }
+                
+            } catch (error) {
+                addLog(`❌ Erro na requisição: ${error.message}`, 'error');
+                addLog('Possíveis problemas:', 'error');
+                addLog('- Servidor PHP não está rodando', 'error');
+                addLog('- URL da API está incorreta', 'error');
+                addLog('- Bloqueio CORS', 'error');
+            }
+        }
+
+        async function testLogout() {
+            const baseUrl = document.getElementById('baseUrl').value;
+            
+            if (!baseUrl) {
+                addLog('❌ Preencha a URL da API', 'error');
+                return;
+            }
+
+            if (!currentToken) {
+                addLog('⚠️ Nenhum token disponível. Tente fazer login primeiro.', 'error');
+                // Mas vamos tentar assim mesmo para ver a resposta da API
+            }
+
+            addLog('---', 'info');
+            addLog('🚪 Iniciando teste de logout...', 'info');
+            
+            try {
+                const url = `${baseUrl}/auth.php?action=logout`;
+                addLog(`POST ${url}`, 'info');
+                addLog(`Authorization: Bearer ${currentToken ? currentToken.substring(0, 15) + '...' : 'null'}`, 'info');
+
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json',
+                        'Authorization': `Bearer ${currentToken}`
+                    }
+                });
+
+                addLog(`Status HTTP: ${response.status} ${response.statusText}`, response.status === 200 ? 'success' : 'error');
+                
+                const data = await response.json();
+                addLog('Resposta recebida:', 'info');
+                addLog(JSON.stringify(data, null, 2), data.success ? 'success' : 'error');
+
+                if (data.success) {
+                    addLog('✅ LOGOUT BEM-SUCEDIDO!', 'success');
+                    currentToken = null;
+                    localStorage.removeItem('debug_token');
+                    addLog('Token removido do localStorage', 'info');
+                } else {
+                    addLog(`❌ Falha no Logout: ${data.message}`, 'error');
+                }
+
+            } catch (error) {
+                addLog(`❌ Erro na requisição: ${error.message}`, 'error');
+            }
+        }
+        
+        // Auto-add initial log
+        addLog('Sistema pronto. Configure email, senha e URL da API.', 'info');
+        if (currentToken) {
+            addLog(`Token existente encontrado: ${currentToken.substring(0, 20)}...`, 'success');
+        }
+        addLog('Credenciais padrão: admin@labcontrol.local / admin123', 'info');
+    </script>
+</body>
+</html>

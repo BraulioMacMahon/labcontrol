@@ -1,0 +1,127 @@
+# =====================================================
+# LabControl - Configuração Apache com Segurança
+# =====================================================
+
+# =====================================================
+# SEGURANÇA - Headers HTTP
+# =====================================================
+
+<IfModule mod_headers.c>
+    # ✅ Content Security Policy - Prevenir XSS
+    Header set Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' http://localhost;"
+    
+    # ✅ Prevenir Clickjacking
+    Header set X-Frame-Options "SAMEORIGIN"
+    
+    # ✅ Prevenir MIME Sniffing
+    Header set X-Content-Type-Options "nosniff"
+    
+    # ✅ Proteger contra XSS (legacy)
+    Header set X-XSS-Protection "1; mode=block"
+    
+    # ✅ Referrer Policy
+    Header set Referrer-Policy "strict-origin-when-cross-origin"
+    
+    # ✅ Permissions Policy
+    Header set Permissions-Policy "geolocation=(), microphone=(), camera=(), payment=()"
+</IfModule>
+
+# =====================================================
+# PROTEÇÃO DE ARQUIVO
+# =====================================================
+
+# Rewrite Engine
+RewriteEngine On
+
+# Bloquear acesso a arquivos sensíveis
+<FilesMatch "^\.">
+    Order allow,deny
+    Deny from all
+</FilesMatch>
+
+<FilesMatch "\.(sql|log|ini|pem|key)$">
+    Order allow,deny
+    Deny from all
+</FilesMatch>
+
+# Bloquear .env
+RewriteRule ^\.env$ - [F,L]
+RewriteRule ^\.env\.example$ - [F,L]
+RewriteRule ^config/.*\.php$ - [F,L]
+RewriteRule ^firebase/ - [F,L]
+RewriteRule ^cache/ - [F,L]
+RewriteRule ^bootstrap/ - [F,L]
+RewriteRule ^middleware/ - [F,L]
+RewriteRule ^classes/ - [F,L]
+
+# =====================================================
+# COMPRESSÃO GZIP
+# =====================================================
+
+<IfModule mod_deflate.c>
+    AddOutputFilterByType DEFLATE text/plain
+    AddOutputFilterByType DEFLATE text/html
+    AddOutputFilterByType DEFLATE text/xml
+    AddOutputFilterByType DEFLATE text/css
+    AddOutputFilterByType DEFLATE text/javascript
+    AddOutputFilterByType DEFLATE application/json
+    AddOutputFilterByType DEFLATE application/x-javascript
+</IfModule>
+
+# =====================================================
+# CACHE BROWSER
+# =====================================================
+
+<IfModule mod_expires.c>
+    ExpiresActive On
+    ExpiresByType image/jpeg "access plus 1 year"
+    ExpiresByType image/gif "access plus 1 year"
+    ExpiresByType image/png "access plus 1 year"
+    ExpiresByType text/css "access plus 30 days"
+    ExpiresByType text/javascript "access plus 30 days"
+    ExpiresByType application/javascript "access plus 30 days"
+    ExpiresDefault "access plus 0 seconds"
+</IfModule>
+
+# =====================================================
+# CONFIGURAÇÃO GERAL
+# =====================================================
+
+# Charset
+AddDefaultCharset UTF-8
+
+# Desabilitar listagem de diretórios
+Options -Indexes
+
+# Configurar PHP
+<IfModule mod_php7.c>
+    php_value upload_max_filesize 10M
+    php_value post_max_size 10M
+    php_value max_execution_time 300
+    php_value max_input_time 300
+    php_value memory_limit 256M
+</IfModule>
+
+# Configurar PHP 8+
+<IfModule mod_php.c>
+    php_value upload_max_filesize 10M
+    php_value post_max_size 10M
+    php_value max_execution_time 300
+    php_value max_input_time 300
+    php_value memory_limit 256M
+</IfModule>
+
+# Compressão GZIP
+<IfModule mod_deflate.c>
+    AddOutputFilterByType DEFLATE text/html text/plain text/xml text/css text/javascript application/javascript application/json
+</IfModule>
+
+# Cache de arquivos estáticos
+<IfModule mod_expires.c>
+    ExpiresActive On
+    ExpiresByType text/css "access plus 1 week"
+    ExpiresByType application/javascript "access plus 1 week"
+    ExpiresByType image/png "access plus 1 month"
+    ExpiresByType image/jpg "access plus 1 month"
+    ExpiresByType image/jpeg "access plus 1 month"
+</IfModule>

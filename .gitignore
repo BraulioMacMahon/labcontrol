@@ -1,0 +1,27 @@
+# Configurações do Sistema
+.env
+.env.example
+*.log
+logs/
+cache/
+
+# Firebase & Segredos
+labcontrol-backend/firebase/service-account.json
+firebase/service-account.json
+
+# Node.js
+node_modules/
+package-lock.json
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# IDEs & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Executáveis & Zip
+nssm.zip
+*.exe

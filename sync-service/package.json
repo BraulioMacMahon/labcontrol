@@ -1,0 +1,14 @@
+{
+  "name": "labcontrol-sync-service",
+  "version": "0.1.0",
+  "description": "Sync service: polls hosts, updates status and last_seen in MySQL, syncs with Firebase",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.0.0",
+    "mysql2": "^3.2.0",
+    "ping": "^0.4.0"
+  }
+}

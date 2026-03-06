@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="pt-br" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LabControl | Central de Documentação</title>
+    <link rel="shortcut icon" href="../labcontrol-frontend/img/logo_imetro.png" type="image/x-icon">
+    <!-- Reutilizando estilos do projeto se possível, ou CDN para Tailwind -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            background-color: #050505;
+            color: #e2e8f0;
+        }
+        
+        .glass-panel {
+            background: rgba(15, 15, 15, 0.75);
+            backdrop-filter: blur(20px) saturate(180%);
+            border-right: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        
+        .markdown-body {
+            color: #cbd5e1;
+            line-height: 1.6;
+        }
+        
+        .markdown-body h1 { font-size: 2.25rem; font-weight: 700; color: #f8fafc; margin-bottom: 1.5rem; border-bottom: 1px solid #334155; padding-bottom: 0.5rem; }
+        .markdown-body h2 { font-size: 1.875rem; font-weight: 600; color: #f1f5f9; margin-top: 2rem; margin-bottom: 1rem; }
+        .markdown-body h3 { font-size: 1.5rem; font-weight: 600; color: #e2e8f0; margin-top: 1.5rem; margin-bottom: 0.75rem; }
+        .markdown-body p { margin-bottom: 1rem; }
+        .markdown-body ul, .markdown-body ol { margin-bottom: 1rem; padding-left: 1.5rem; list-style-type: disc; }
+        .markdown-body code { background: rgba(255, 255, 255, 0.1); padding: 0.2rem 0.4rem; border-radius: 0.25rem; font-family: monospace; font-size: 0.875em; }
+        .markdown-body pre { background: #0f172a; padding: 1rem; border-radius: 0.5rem; overflow-x: auto; margin-bottom: 1rem; border: 1px solid #1e293b; }
+        .markdown-body pre code { background: transparent; padding: 0; }
+        .markdown-body table { width: 100%; border-collapse: collapse; margin-bottom: 1rem; }
+        .markdown-body th, .markdown-body td { border: 1px solid #334155; padding: 0.75rem; text-align: left; }
+        .markdown-body th { background: rgba(255, 255, 255, 0.05); }
+        .markdown-body blockquote { border-left: 4px solid #3b82f6; padding-left: 1rem; color: #94a3b8; font-style: italic; margin-bottom: 1rem; }
+        .markdown-body a { color: #60a5fa; text-decoration: none; }
+        .markdown-body a:hover { text-decoration: underline; }
+
+        .nav-item {
+            transition: all 0.2s ease;
+            cursor: pointer;
+            border-left: 3px solid transparent;
+        }
+        
+        .nav-item:hover {
+            background: rgba(255, 255, 255, 0.03);
+            color: #60a5fa;
+        }
+        
+        .nav-item.active {
+            background: linear-gradient(90deg, rgba(59, 130, 246, 0.1) 0%, transparent 100%);
+            color: #60a5fa;
+            border-left-color: #60a5fa;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); border-radius: 10px; }
+    </style>
+</head>
+<body class="h-screen flex overflow-hidden">
+
+    <!-- Sidebar -->
+    <aside class="w-80 glass-panel h-full flex flex-col z-20">
+        <div class="p-6 border-bottom border-white/5">
+            <div class="flex items-center gap-3 mb-2">
+                <img src="../labcontrol-frontend/img/logo_imetro.png" alt="Logo" class="w-8 h-8">
+                <h1 class="text-xl font-bold tracking-tight text-white">Docs Center</h1>
+            </div>
+            <p class="text-xs text-slate-400 font-medium uppercase tracking-widest">LabControl Platform</p>
+        </div>
+
+        <nav class="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-1" id="doc-nav">
+            <!-- Nav sections will be injected here -->
+            <div class="py-2 px-2 text-xs font-semibold text-slate-500 uppercase tracking-wider mt-4">Documentação Técnica</div>
+            <div class="nav-item p-3 rounded-r-md text-sm font-medium active" data-file="INDEX.md">Início / Índice</div>
+            <div class="nav-item p-3 rounded-r-md text-sm font-medium" data-file="DOCUMENTACAO_ARQUITETURA.md">Arquitetura do Sistema</div>
+            <div class="nav-item p-3 rounded-r-md text-sm font-medium" data-file="GUIA_INSTALACAO.md">Guia de Instalação</div>
+            <div class="nav-item p-3 rounded-r-md text-sm font-medium" data-file="DOCUMENTACAO_BANCO_DE_DADOS.md">Banco de Dados</div>
+            <div class="nav-item p-3 rounded-r-md text-sm font-medium" data-file="DOCUMENTACAO_API.md">API & Endpoints</div>
+            <div class="nav-item p-3 rounded-r-md text-sm font-medium" data-file="DOCUMENTACAO_OPERACOES_REMOTAS.md">Operações Remotas</div>
+            <div class="nav-item p-3 rounded-r-md text-sm font-medium" data-file="DOCUMENTACAO_FRONTEND.md">Frontend & UI</div>
+            <div class="nav-item p-3 rounded-r-md text-sm font-medium" data-file="DOCUMENTACAO_MANUTENCAO.md">Manutenção & Backup</div>
+
+            <div class="py-2 px-2 text-xs font-semibold text-slate-500 uppercase tracking-wider mt-6">Gestão & Auditoria</div>
+            <div class="nav-item p-3 rounded-r-md text-sm font-medium" data-file="SUMARIO_EXECUTIVO.md">Sumário Executivo</div>
+            <div class="nav-item p-3 rounded-r-md text-sm font-medium" data-file="AUDITORIA_PLATAFORMA.md">Auditoria da Plataforma</div>
+            <div class="nav-item p-3 rounded-r-md text-sm font-medium" data-file="CHECKLIST_DEPLOYMENT.md">Checklist de Deployment</div>
+            <div class="nav-item p-3 rounded-r-md text-sm font-medium" data-file="GUIA_IMPLEMENTACAO.md">Guia de Implementação</div>
+            <div class="nav-item p-3 rounded-r-md text-sm font-medium" data-file="README_AUDITORIA.md">Readme Auditoria</div>
+            <div class="nav-item p-3 rounded-r-md text-sm font-medium" data-file="MATRIZ_TESTES.md">Matriz de Testes</div>
+            <div class="nav-item p-3 rounded-r-md text-sm font-medium" data-file="INDICE.md">Índice Geral</div>
+            <div class="nav-item p-3 rounded-r-md text-sm font-medium" data-file="README_BACKEND.md">Backend (Readme)</div>
+            <div class="nav-item p-3 rounded-r-md text-sm font-medium" data-file="README_SYNC_SERVICE.md">Sync Service (Readme)</div>
+        </nav>
+
+        <div class="p-4 border-t border-white/5 bg-black/20">
+            <a href="../labcontrol-frontend/index.html" class="flex items-center gap-2 text-xs text-slate-400 hover:text-white transition-colors">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                </svg>
+                Voltar ao Dashboard
+            </a>
+        </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="flex-1 h-full overflow-y-auto custom-scrollbar relative">
+        <div id="loading-overlay" class="absolute inset-0 bg-black/50 backdrop-blur-sm z-30 flex items-center justify-center opacity-0 pointer-events-none transition-opacity">
+            <div class="flex flex-col items-center gap-3">
+                <div class="w-10 h-10 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin"></div>
+                <span class="text-sm font-medium text-slate-300">Carregando documento...</span>
+            </div>
+        </div>
+
+        <div class="max-w-4xl mx-auto py-12 px-8">
+            <div id="content-viewer" class="markdown-body animate-fade-in">
+                <!-- Content will be rendered here -->
+                <div class="flex items-center justify-center h-64 text-slate-500">
+                    Selecione um documento no menu lateral para visualizar.
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const navItems = document.querySelectorAll('.nav-item');
+            const contentViewer = document.getElementById('content-viewer');
+            const loadingOverlay = document.getElementById('loading-overlay');
+
+            async function loadMarkdown(filePath) {
+                loadingOverlay.classList.replace('opacity-0', 'opacity-100');
+                loadingOverlay.classList.remove('pointer-events-none');
+
+                try {
+                    const response = await fetch(filePath);
+                    if (!response.ok) throw new Error('Falha ao carregar o arquivo: ' + response.statusText);
+                    
+                    const markdown = await response.text();
+                    
+                    // Configurar marked para lidar com links internos se necessário
+                    contentViewer.innerHTML = marked.parse(markdown);
+                    
+                    // Scroll back to top
+                    document.querySelector('main').scrollTop = 0;
+                    
+                    // Adicionar animação simples
+                    contentViewer.classList.remove('animate-fade-in');
+                    void contentViewer.offsetWidth; // trigger reflow
+                    contentViewer.classList.add('animate-fade-in');
+
+                } catch (error) {
+                    contentViewer.innerHTML = `
+                        <div class="bg-red-500/10 border border-red-500/20 p-6 rounded-lg text-red-400">
+                            <h3 class="text-lg font-bold mb-2">Erro ao carregar documento</h3>
+                            <p>${error.message}</p>
+                            <p class="text-sm mt-4 italic">Certifique-se de que o arquivo existe em <code>${filePath}</code></p>
+                        </div>
+                    `;
+                } finally {
+                    loadingOverlay.classList.replace('opacity-100', 'opacity-0');
+                    loadingOverlay.classList.add('pointer-events-none');
+                }
+            }
+
+            navItems.forEach(item => {
+                item.addEventListener('click', () => {
+                    navItems.forEach(i => i.classList.remove('active'));
+                    item.classList.add('active');
+                    
+                    const file = item.getAttribute('data-file');
+                    loadMarkdown(file);
+                    
+                    // Atualizar URL (opcional, sem recarregar)
+                    window.history.pushState({file}, '', `?doc=${file}`);
+                });
+            });
+
+            // Carregar inicial baseado na URL ou padrão (INDEX.md)
+            const urlParams = new URLSearchParams(window.location.search);
+            const docParam = urlParams.get('doc');
+            
+            if (docParam) {
+                const target = Array.from(navItems).find(i => i.getAttribute('data-file') === docParam);
+                if (target) {
+                    target.click();
+                } else {
+                    loadMarkdown('INDEX.md');
+                }
+            } else {
+                // Carrega o primeiro item ativo por padrão
+                const activeItem = document.querySelector('.nav-item.active');
+                if (activeItem) {
+                    loadMarkdown(activeItem.getAttribute('data-file'));
+                }
+            }
+        });
+    </script>
+</body>
+</html>
