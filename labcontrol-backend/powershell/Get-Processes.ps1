@@ -60,6 +60,11 @@ $scriptBlock = {
         $os = Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue
         $totalMemKB = if ($os) { $os.TotalVisibleMemorySize } else { 1 }
         
+        # Mapear serviços por ProcessId para identificar svchost
+        $services = Get-CimInstance Win32_Service -ErrorAction SilentlyContinue | 
+                    Where-Object { $_.ProcessId -gt 0 } | 
+                    Group-Object ProcessId -AsHashTable -AsString
+        
         # Obter dados de performance em tempo real
         $perfData = Get-CimInstance Win32_PerfFormattedData_PerfProc_Process -ErrorAction SilentlyContinue | 
                     Where-Object { $_.Name -notmatch "_Total|Idle" } |
@@ -73,20 +78,38 @@ $scriptBlock = {
             
             $cpuPercent = if ($perf) { $perf.PercentProcessorTime } else { 0 }
             
+            # Tentar obter descrição amigável
+            $description = ""
+            try { $description = $_.Description } catch { $description = "" }
+            
+            # Se for svchost ou processo genérico, tentar listar serviços
+            $svcInfo = ""
+            if ($services.ContainsKey("$id")) {
+                $svcInfo = ($services["$id"] | Select-Object -ExpandProperty Name) -join ", "
+            }
+            
+            # Construir nome de exibição mais informativo
+            $displayName = $name
+            if ($name -eq "svchost" -and $svcInfo) {
+                $displayName = "svchost ($svcInfo)"
+            } elseif ($description -and $name -notmatch $description) {
+                $displayName = "$name ($description)"
+            }
+            
             # StartTime pode falhar para processos do sistema
             $startTimeStr = ""
             try { $startTimeStr = $_.StartTime.ToString("yyyy-MM-dd HH:mm:ss") } catch { $startTimeStr = "N/A" }
             
             [PSCustomObject]@{
                 Id = $id
-                ProcessName = $name
+                ProcessName = $displayName
                 CPU = [math]::Round($cpuPercent, 1)
                 MemoryMB = [math]::Round($_.WorkingSet64 / 1MB, 2)
                 MemoryPercent = [math]::Round(($_.WorkingSet64 / 1024 / $totalMemKB) * 100, 2)
                 StartTime = $startTimeStr
                 Responding = $_.Responding
             }
-        } | Sort-Object CPU -Descending | Select-Object -First 50
+        } | Sort-Object CPU, MemoryMB -Descending | Select-Object -First 50
         
         return @{ Success = $true; Processes = $processes }
     }
