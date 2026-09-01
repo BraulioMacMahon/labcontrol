@@ -1,5 +1,10 @@
 import { api } from './api-service.js?v=1.1';
 
+// Escape HTML para evitar XSS armazenado (ex.: via hostname de host ou nome de processo)
+const lcEscape = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+}[c]));
+
 const Components = {
     AuthUI: () => `
         <div class="w-full max-w-md p-10 glass-panel rounded-[2rem] shadow-2xl animate-float relative overflow-hidden">
@@ -56,7 +61,7 @@ const Components = {
                         }
                     </div>
                     <div class="flex flex-col items-start">
-                        <span class="text-xs font-bold tracking-tight text-white group-hover:text-blue-400 transition-colors">${host.name}</span>
+                        <span class="text-xs font-bold tracking-tight text-white group-hover:text-blue-400 transition-colors">${lcEscape(host.name)}</span>
                         <span class="text-[10px] font-mono text-gray-500">${host.ip}</span>
                     </div>
                 </div>
@@ -475,7 +480,7 @@ class LabControlApp {
                                 <span class="text-[10px] font-bold text-gray-400 uppercase">${host.status}</span>
                             </div>
                         </div>
-                        <h1 class="text-4xl font-extrabold tracking-tight text-white mb-2">${host.name}</h1>
+                        <h1 class="text-4xl font-extrabold tracking-tight text-white mb-2">${lcEscape(host.name)}</h1>
                         <div class="flex items-center gap-4 text-gray-500 text-sm font-medium">
                             <span class="font-mono">${host.ip}</span>
                             <span class="font-mono">${host.mac || 'No MAC'}</span>
@@ -549,7 +554,7 @@ class LabControlApp {
                         const name = p.ProcessName || p.name;
                         return `
                             <tr class="hover:bg-white/[0.02] group transition-colors">
-                                <td class="px-8 py-4 text-xs text-gray-300 font-bold">${name}</td>
+                                <td class="px-8 py-4 text-xs text-gray-300 font-bold">${lcEscape(name)}</td>
                                 <td class="px-8 py-4 font-mono text-[10px] text-gray-500">${pid}</td>
                                 <td class="px-8 py-4 text-xs text-gray-400">${p.CPU ? p.CPU.toFixed(1)+'%' : '0%'}</td>
                                 <td class="px-8 py-4 text-right">

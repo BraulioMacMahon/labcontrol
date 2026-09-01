@@ -15,14 +15,12 @@ ini_set('display_errors', 0);
 // Set up error handler before anything else
 set_error_handler(function($errno, $errstr, $errfile, $errline) {
     ob_end_clean(); // Clear any buffered output
+    error_log("LabControl PHP Error: $errstr in $errfile:$errline");
     http_response_code(500);
     header('Content-Type: application/json; charset=utf-8');
     echo json_encode([
         'success' => false,
-        'message' => 'PHP Error',
-        'error' => $errstr,
-        'file' => $errfile,
-        'line' => $errline,
+        'message' => 'Erro interno do servidor',
         'timestamp' => date('Y-m-d H:i:s')
     ], JSON_PRETTY_PRINT);
     exit;
@@ -31,13 +29,12 @@ set_error_handler(function($errno, $errstr, $errfile, $errline) {
 // Set up exception handler
 set_exception_handler(function($exception) {
     ob_end_clean(); // Clear any buffered output
+    error_log("LabControl Exception: " . $exception->getMessage() . " in " . $exception->getFile() . ":" . $exception->getLine());
     http_response_code(500);
     header('Content-Type: application/json; charset=utf-8');
     echo json_encode([
         'success' => false,
-        'message' => 'Exception: ' . $exception->getMessage(),
-        'file' => $exception->getFile(),
-        'line' => $exception->getLine(),
+        'message' => 'Erro interno do servidor',
         'timestamp' => date('Y-m-d H:i:s')
     ], JSON_PRETTY_PRINT);
     exit;

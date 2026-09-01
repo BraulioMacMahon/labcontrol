@@ -229,4 +229,68 @@ class Database {
             [':days' => $days]
         );
     }
+
+    // =====================================================
+    // TRANSAÇÕES (restaurado de Database_backup.php)
+    // =====================================================
+    public function beginTransaction() {
+        return $this->connection->beginTransaction();
+    }
+
+    public function commit() {
+        return $this->connection->commit();
+    }
+
+    public function rollback() {
+        return $this->connection->rollBack();
+    }
+
+    public function inTransaction() {
+        return $this->connection->inTransaction();
+    }
+
+    // =====================================================
+    // MÉTODOS DE CREDENCIAIS REMOTAS (restaurado de Database_backup.php)
+    // =====================================================
+    public function getDefaultCredentials() {
+        return $this->selectOne("SELECT * FROM remote_credentials WHERE is_default = 1 LIMIT 1");
+    }
+
+    public function saveDefaultCredentials($username, $encryptedPassword, $description = null) {
+        // Remove credencial padrão existente
+        $this->execute("UPDATE remote_credentials SET is_default = 0 WHERE is_default = 1");
+
+        // Insere nova credencial padrão
+        return $this->insert('remote_credentials', [
+            'credential_name' => 'default',
+            'username' => $username,
+            'password_encrypted' => $encryptedPassword,
+            'description' => $description,
+            'is_default' => 1
+        ]);
+    }
+
+    public function updateHostCredentials($hostId, $username, $encryptedPassword, $useDefault = false) {
+        return $this->update('hosts', [
+            'remote_user' => $useDefault ? null : $username,
+            'remote_password_encrypted' => $useDefault ? null : $encryptedPassword,
+            'use_default_credentials' => $useDefault ? 1 : 0,
+            'synced' => 0
+        ], 'id = :id', [':id' => $hostId]);
+    }
+
+    public function getAllCredentials() {
+        return $this->select(
+            "SELECT id, credential_name, username, description, is_default, created_at, updated_at
+             FROM remote_credentials
+             ORDER BY is_default DESC, credential_name ASC"
+        );
+    }
+
+    public function deleteCredentials($id) {
+        return $this->execute(
+            "DELETE FROM remote_credentials WHERE id = :id AND is_default = 0",
+            [':id' => $id]
+        );
+    }
 }

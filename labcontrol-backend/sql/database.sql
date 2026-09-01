@@ -144,12 +144,11 @@ CREATE TABLE IF NOT EXISTS remote_credentials (
 -- DADOS INICIAIS
 -- =====================================================
 
--- Usuários iniciais (senha: admin123 para admin, operator123 para operators)
--- Hash gerado via password_hash() do PHP com bcrypt
-INSERT INTO users (email, password_hash, role, is_active) VALUES
-('admin@labcontrol.local', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'admin', 1),
-('operator1@labcontrol.local', '$2y$10$N9qo8uLOickgx2ZMRZoMy.MqrqQzBZN0UfFyBqQxqJ8zE5L1Qq5q2', 'operator', 1),
-('operator2@labcontrol.local', '$2y$10$N9qo8uLOickgx2ZMRZoMy.MqrqQzBZN0UfFyBqQxqJ8zE5L1Qq5q2', 'operator', 1);
+-- ATENÇÃO: não inserir credenciais padrão conhecidas (ex.: admin123/operator123).
+-- Crie o administrador via fluxo de setup documentado, com senha forte (16+ caracteres),
+-- no primeiro acesso. Exemplo manual (execute com uma senha forte):
+-- INSERT INTO users (email, password_hash, role, is_active)
+-- VALUES ('admin@labcontrol.local', <password_hash('SuaSenhaForte16+')>, 'admin', 1);
 
 -- Hosts iniciais de exemplo
 INSERT INTO hosts (ip, hostname, mac_address, status, os_type, location, description, is_active, last_seen) VALUES

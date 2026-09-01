@@ -13,13 +13,12 @@ ini_set('display_errors', 0);
 // Set up error handler
 set_error_handler(function($errno, $errstr, $errfile, $errline) {
     if (ob_get_length()) ob_end_clean();
+    error_log("LabControl PHP Error: $errstr in $errfile:$errline");
     http_response_code(500);
     header('Content-Type: application/json; charset=utf-8');
     echo json_encode([
         'success' => false,
-        'message' => 'PHP Error: ' . $errstr,
-        'file' => $errfile,
-        'line' => $errline
+        'message' => 'Erro interno do servidor'
     ], JSON_PRETTY_PRINT);
     exit;
 }, E_ALL);
@@ -35,7 +34,7 @@ try {
     // Responder a preflight requests
     if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
         if (ob_get_length()) ob_end_clean();
-        header('Access-Control-Allow-Origin: ' . CORS_ALLOWED_ORIGINS);
+        header('Access-Control-Allow-Origin: ' . getCorsOrigin());
         header('Access-Control-Allow-Methods: ' . CORS_ALLOWED_METHODS);
         header('Access-Control-Allow-Headers: ' . CORS_ALLOWED_HEADERS);
         http_response_code(200);
@@ -114,5 +113,6 @@ try {
 
 } catch (Throwable $e) {
     if (ob_get_length()) ob_end_clean();
-    jsonResponse(false, 'Erro: ' . $e->getMessage(), null, 500);
+    error_log("LabControl Sync Error: " . $e->getMessage());
+    jsonResponse(false, 'Erro interno no servidor', null, 500);
 }

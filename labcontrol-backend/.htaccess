@@ -24,6 +24,9 @@
     
     # ✅ Permissions Policy
     Header set Permissions-Policy "geolocation=(), microphone=(), camera=(), payment=()"
+
+    # ✅ HSTS (força HTTPS) - só tem efeito quando servido por HTTPS
+    Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
 </IfModule>
 
 # =====================================================

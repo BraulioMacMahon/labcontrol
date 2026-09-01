@@ -10,12 +10,12 @@ ini_set('display_errors', 0);
 
 set_error_handler(function($errno, $errstr, $errfile, $errline) {
     ob_end_clean();
+    error_log("LabControl PHP Error: $errstr in $errfile:$errline");
     http_response_code(500);
     header('Content-Type: application/json; charset=utf-8');
     echo json_encode([
         'success' => false,
-        'message' => 'PHP Error',
-        'error' => $errstr
+        'message' => 'Erro interno do servidor'
     ], JSON_PRETTY_PRINT);
     exit;
 }, E_ALL);
@@ -192,11 +192,12 @@ try {
     
 } catch (Throwable $e) {
     ob_end_clean();
+    error_log("LabControl Security Error: " . $e->getMessage());
     http_response_code(500);
     header('Content-Type: application/json; charset=utf-8');
     echo json_encode([
         'success' => false,
-        'message' => $e->getMessage()
+        'message' => 'Erro interno do servidor'
     ], JSON_PRETTY_PRINT);
 }
 ?>

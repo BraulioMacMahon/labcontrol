@@ -1,5 +1,8 @@
 const API_CONFIG = {
-    baseURL: 'http://localhost/labcontrol/labcontrol-backend/api',  // CAMINHO CORRETO
+    // Base URL da API. Usa location.origin para herdar protocolo (HTTP/HTTPS) e host,
+    // funcionando fora de localhost. Em hospedagem com subpasta diferente, defina
+    // window.LABCONTROL_API_BASE_URL no index.html.
+    baseURL: (window.LABCONTROL_API_BASE_URL || `${location.origin}/labcontrol/labcontrol-backend/api`),
     timeout: 15000,
     retries: 2
 };

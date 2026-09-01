@@ -128,6 +128,11 @@ switch ($action) {
             jsonResponse(false, 'IP e hostname são obrigatórios', null, 400);
         }
 
+        // Validar hostname (caracteres seguros — evita XSS/inyeção)
+        if (!preg_match('/^[a-zA-Z0-9\-_.]{1,100}$/', $hostname)) {
+            jsonResponse(false, 'Hostname inválido', null, 400);
+        }
+
         // Validar IP
         if (!filter_var($ip, FILTER_VALIDATE_IP)) {
             jsonResponse(false, 'IP inválido', null, 400);
@@ -232,6 +237,11 @@ switch ($action) {
             if (isset($input[$field])) {
                 $updateData[$field] = $input[$field];
             }
+        }
+        
+        // Validar hostname se fornecido
+        if (isset($updateData['hostname']) && !preg_match('/^[a-zA-Z0-9\-_.]{1,100}$/', $updateData['hostname'])) {
+            jsonResponse(false, 'Hostname inválido', null, 400);
         }
         
         if (empty($updateData)) {
@@ -428,6 +438,12 @@ switch ($action) {
                 if (empty($hostData['ip']) || empty($hostData['hostname'])) {
                     $failed++;
                     $errors[] = "Linha {$index}: IP e hostname são obrigatórios";
+                    continue;
+                }
+                
+                if (!preg_match('/^[a-zA-Z0-9\-_.]{1,100}$/', $hostData['hostname'])) {
+                    $failed++;
+                    $errors[] = "Linha {$index}: Hostname inválido";
                     continue;
                 }
                 

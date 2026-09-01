@@ -13,6 +13,27 @@ if (!defined('LABCONTROL')) {
 // =====================================================
 require_once __DIR__ . '/../bootstrap/env.php';
 
+// Persiste uma chave de segredo no .env (self-bootstrap), criando o arquivo se necessário.
+// Gera chaves ÚNICAS por instalação em vez de usar valores hardcoded do repositório.
+function labcontrolPersistEnv($key, $value) {
+    $envFile = __DIR__ . '/../../.env';
+    if (file_exists($envFile)) {
+        if (!is_writable($envFile)) {
+            error_log("⚠️ AVISO: não foi possível persistir {$key} no .env (sem permissão). Execute setup.php.");
+            return false;
+        }
+        $content = file_get_contents($envFile);
+        if (strpos($content, $key . '=') === false) {
+            file_put_contents($envFile, rtrim($content) . "\n{$key}={$value}\n");
+        }
+    } else {
+        $example = __DIR__ . '/../../.env.example';
+        $base = file_exists($example) ? file_get_contents($example) : '';
+        file_put_contents($envFile, rtrim($base) . "\n{$key}={$value}\n");
+    }
+    return true;
+}
+
 $envPath = __DIR__ . '/../../.env';
 if (file_exists($envPath)) {
     loadEnv($envPath);
@@ -49,10 +70,11 @@ define('SESSION_TIMEOUT', (int)env('SESSION_TIMEOUT', 3600));
 define('MAX_LOGIN_ATTEMPTS', (int)env('MAX_LOGIN_ATTEMPTS', 5));
 define('LOGIN_LOCKOUT_TIME', (int)env('LOGIN_LOCKOUT_TIME', 900));
 
-// JWT Secret - CRÍTICO!
+// JWT Secret - CRÍTICO! Gera e persiste se ausente (self-bootstrap).
 $jwtSecret = env('JWT_SECRET', null);
 if (empty($jwtSecret) || strlen($jwtSecret) < 16) {
-    die('❌ ERRO CRÍTICO: JWT_SECRET inválido ou muito curto! Use: openssl rand -hex 32');
+    $jwtSecret = bin2hex(random_bytes(32));
+    labcontrolPersistEnv('JWT_SECRET', $jwtSecret);
 }
 define('JWT_SECRET', $jwtSecret);
 
@@ -68,7 +90,15 @@ define('API_TIMEOUT', (int)env('API_TIMEOUT', 15000));
 // =====================================================
 // CRIPTOGRAFIA
 // =====================================================
-define('ENCRYPTION_KEY', env('ENCRYPTION_KEY', 'labcontrol_encryption_key_32chars_long_1234567890'));
+// Sem fallback hardcoded no código (evita chave pública no repositório).
+// Se ausente/inválida, gera uma CHAVE ÚNICA por instalação e a persiste no .env
+// (self-bootstrap), para não quebrar o backend nem reintroduzir chave conhecida.
+$encryptionKey = env('ENCRYPTION_KEY', null);
+if (empty($encryptionKey) || strlen($encryptionKey) < 16) {
+    $encryptionKey = bin2hex(random_bytes(32));
+    labcontrolPersistEnv('ENCRYPTION_KEY', $encryptionKey);
+}
+define('ENCRYPTION_KEY', $encryptionKey);
 define('ENCRYPTION_METHOD', 'AES-256-CBC');
 
 // =====================================================
@@ -144,11 +174,10 @@ function jsonResponse($success, $message = '', $data = null, $code = 200) {
 }
 
 function getClientIP() {
-    $ipKeys = ['HTTP_CF_CONNECTING_IP', 'HTTP_X_FORWARDED_FOR', 'REMOTE_ADDR'];
-    foreach ($ipKeys as $key) {
-        if (!empty($_SERVER[$key])) return $_SERVER[$key];
-    }
-    return '0.0.0.0';
+    // Por padrão usamos REMOTE_ADDR para evitar spoofing de cabeçalhos HTTP
+    // (essencial para o rate limiting de login e para a integridade dos logs de auditoria).
+    // Se estiver atrás de um proxy reverso confiável, estenda aqui validando o IP de origem.
+    return !empty($_SERVER['REMOTE_ADDR']) ? $_SERVER['REMOTE_ADDR'] : '0.0.0.0';
 }
 
 function generateJWT($payload) {

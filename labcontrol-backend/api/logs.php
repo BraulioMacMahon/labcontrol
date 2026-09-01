@@ -9,7 +9,7 @@ require_once __DIR__ . '/../config/config.php';
 require_once __DIR__ . '/../includes/Database.php';
 
 // Headers CORS
-header('Access-Control-Allow-Origin: ' . CORS_ALLOWED_ORIGINS);
+header('Access-Control-Allow-Origin: ' . getCorsOrigin());
 header('Access-Control-Allow-Methods: ' . CORS_ALLOWED_METHODS);
 header('Access-Control-Allow-Headers: ' . CORS_ALLOWED_HEADERS);
 header('Content-Type: application/json; charset=utf-8');

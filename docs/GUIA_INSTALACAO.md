@@ -32,7 +32,32 @@
 2.  Edite o arquivo `.env` com suas credenciais (veja a seção 4 deste guia).
 3.  Repita o processo para a pasta `sync-service/.env`.
 
+### Passo 3b: Setup de Primeiro Acesso (criar administrador + segredos)
+
+O banco **não** vem com usuários nem com segredos (por segurança). Execute o setup **uma única vez**, a partir do localhost:
+
+**Via navegador (localhost):**
+```
+http://localhost/labcontrol/labcontrol-backend/setup.php?email=admin@labcontrol.local&password=SUA_SENHA_FORTE_16+
+```
+
+**Ou via CLI:**
+```bash
+cd labcontrol-backend
+php setup.php --email=admin@labcontrol.local --password=SUA_SENHA_FORTE_16+
+```
+
+O script irá:
+- Gerar o arquivo `.env` (se ausente) e criar `JWT_SECRET` + `ENCRYPTION_KEY` fortes automaticamente.
+- Criar o primeiro usuário **admin** com a senha informada (mín. 12 caracteres). Ele NÃO roda se já existirem usuários.
+- Após o uso, remova `labcontrol-backend/setup.php`.
+
+> Nunca reuse senhas fracas (ex.: `admin123`). O setup recusa senhas com menos de 12 caracteres.
+
 ### Passo 4: Instalação das Dependências do Worker (Node.js)
+
+O sync-service (Node.js) é responsável por atualizar o status dos hosts e sincronizar com o Firebase. **Ele precisa estar em execução** para que a sincronização funcione; sem ele, o restante da plataforma (CRUD, controle remoto, logs) continua operando normalmente.
+
 1.  Abra o terminal na pasta `sync-service`.
 2.  Execute o comando:
     ```bash
@@ -83,9 +108,12 @@ Abra o **XAMPP Control Panel** e clique em **Start** para:
 Para fins de desenvolvimento:
 ```bash
 cd sync-service
+npm install   # apenas na primeira vez
 npm start
 ```
-*Para produção, utilize o arquivo `run-worker.bat` ou configure como serviço via NSSM.*
+*Para produção, utilize o arquivo `run-worker.bat` ou configure como serviço via NSSM (o worker deve permanecer em execução para a sincronização funcionar).*
+
+> O worker roda no **controlador Windows** e usa o `powershell.exe` (caminho configurável em `POWERSHELL_PATH` no `sync-service/.env`) para checagem de hosts. Em ambientes puramente Linux, a sincronização com Firebase continua opcional; o status dos hosts pode ser atualizado pelo backend via ping.
 
 ### 3. Acesso à Plataforma
 Abra o navegador e acesse: `http://localhost/labcontrol/labcontrol-frontend/`

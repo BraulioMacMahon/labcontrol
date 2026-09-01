@@ -1,0 +1,12 @@
+# Protege os scripts de debug/testes de acesso via web.
+# Estes scripts podem (re)criar usuários e expor dados; nunca devem ficar
+# acessíveis em produção. Mantenha esta pasta fora do docroot ou com esta negação.
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteRule ^ - [F,L]
+</IfModule>
+
+<IfModule !mod_rewrite.c>
+    Order allow,deny
+    Deny from all
+</IfModule>
