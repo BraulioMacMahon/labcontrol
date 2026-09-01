@@ -1,0 +1,4 @@
+COnsultar IP: ping -4 LAB17-PC35
+
+Consultar MAC & HostName: nbtstat -a LAB17-PC35
+
