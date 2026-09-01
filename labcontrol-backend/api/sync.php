@@ -103,7 +103,8 @@ try {
                 $db->logAction($payload['user_id'], $payload['email'], null, null, 'Sincronização manual', 'sync', json_encode($results), 'success');
                 jsonResponse(true, 'Sincronização concluída', $results);
             } catch (Exception $e) {
-                jsonResponse(false, 'Falha na sincronização: ' . $e->getMessage(), null, 200);
+                logError('Falha na sincronização manual', ['error' => $e->getMessage()]);
+                jsonResponse(false, 'Falha na sincronização. Consulte os logs do servidor.', null, 500);
             }
             break;
 

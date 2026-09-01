@@ -56,6 +56,19 @@ RewriteRule ^cache/ - [F,L]
 RewriteRule ^bootstrap/ - [F,L]
 RewriteRule ^middleware/ - [F,L]
 RewriteRule ^classes/ - [F,L]
+RewriteRule ^includes/ - [F,L]
+RewriteRule ^powershell/ - [F,L]
+RewriteRule ^sql/ - [F,L]
+RewriteRule ^logs/ - [F,L]
+
+# Scripts de manutenção só via CLI (cron / Agendador de Tarefas) — nunca via web
+RewriteRule ^security-notifications\.php$ - [F,L]
+
+# Cópias de backup não devem ser servidas
+<FilesMatch "_backup\.php$">
+    Order allow,deny
+    Deny from all
+</FilesMatch>
 
 # =====================================================
 # COMPRESSÃO GZIP

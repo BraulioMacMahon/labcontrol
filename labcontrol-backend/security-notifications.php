@@ -7,8 +7,19 @@
  * - Atividade suspeita
  * - Acesso a contas desativadas
  * 
- * Execute periodicamente (ex: a cada 30 minutos via cron)
+ * Execute periodicamente (ex: a cada 30 minutos via cron / Agendador de Tarefas):
+ *   php labcontrol-backend/security-notifications.php
  */
+
+// Apenas linha de comandos. Este script não tem autenticação: se fosse acessível
+// via web, qualquer pessoa poderia disparar emails para os administradores,
+// executar a limpeza de logs e ler os emails dos admins na saída.
+if (PHP_SAPI !== 'cli' && PHP_SAPI !== 'phpdbg') {
+    http_response_code(403);
+    header('Content-Type: text/plain; charset=utf-8');
+    echo "Forbidden: este script só pode ser executado via linha de comandos.\n";
+    exit(1);
+}
 
 require_once __DIR__ . '/config/config.php';
 require_once __DIR__ . '/includes/Database.php';

@@ -1,7 +1,7 @@
 # 📑 Índice de Documentação - LabControl
 
-**Última Atualização**: 06 de Março de 2026  
-**Status do Projeto**: 🟢 Fase 1 (Segurança Crítica) Concluída | 🟡 Fase 2 em Andamento  
+**Última Atualização**: 01 de Setembro de 2026  
+**Status do Projeto**: 🟡 Hardening em curso — ver [**Análise 01/09/2026**](ANALISE_2026-09-01.md) (fonte de verdade atual; o Sumário Executivo de março está desatualizado)  
 
 Este diretório contém a documentação técnica e estratégica da plataforma LabControl, organizada para diferentes perfis de usuários.
 
@@ -24,7 +24,8 @@ Este diretório contém a documentação técnica e estratégica da plataforma L
 ### 2. Gestão, Auditoria e Compliance (Para Gestores e QA)
 | Documento | Descrição |
 | :--- | :--- |
-| [**Sumário Executivo**](SUMARIO_EXECUTIVO.md) | Visão estratégica, scores de qualidade e roadmap de negócio. |
+| [**Análise 01/09/2026**](ANALISE_2026-09-01.md) | ⭐ Estado atual verificado no código: correções aplicadas, pendências e checklist pós-deploy. |
+| [**Sumário Executivo**](SUMARIO_EXECUTIVO.md) | Visão estratégica de março/2026 (desatualizada — os scores não refletem o código atual). |
 | [**Auditoria da Plataforma**](AUDITORIA_PLATAFORMA.md) | Relatório detalhado de vulnerabilidades e correções aplicadas. |
 | [**Checklist de Deployment**](CHECKLIST_DEPLOYMENT.md) | Verificações obrigatórias antes de subir para produção. |
 | [**Matriz de Testes**](MATRIZ_TESTES.md) | Plano de testes, cobertura de código e QA. |

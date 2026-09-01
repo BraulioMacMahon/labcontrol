@@ -33,6 +33,30 @@ class FirebaseIntegration {
         }
         return $this->db;
     }
+
+    /**
+     * Aplica opções TLS seguras a um handle cURL.
+     *
+     * A verificação do certificado NUNCA é desativada: sem ela, qualquer
+     * atacante na rede podia interpor-se entre o servidor e a Google e capturar
+     * o token OAuth da service account (acesso total ao Firestore do projeto).
+     *
+     * No XAMPP/Windows, se o php.ini não tiver `curl.cainfo`, aponte
+     * FIREBASE_CA_BUNDLE no .env para o cacert.pem incluído no XAMPP
+     * (ex.: C:\xampp\apache\bin\curl-ca-bundle.crt) ou para um bundle atualizado.
+     */
+    private function applyTlsOptions($ch) {
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 2);
+        curl_setopt($ch, CURLOPT_PROTOCOLS, CURLPROTO_HTTPS);
+        curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 10);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+
+        $caBundle = env('FIREBASE_CA_BUNDLE', '');
+        if ($caBundle !== '' && is_readable($caBundle)) {
+            curl_setopt($ch, CURLOPT_CAINFO, $caBundle);
+        }
+    }
     
     /**
      * Verifica se Firebase está habilitado e conectado
@@ -87,9 +111,12 @@ class FirebaseIntegration {
                 'grant_type' => 'urn:ietf:params:oauth:grant-type:jwt-bearer',
                 'assertion' => $jwt
             ]));
-            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+            $this->applyTlsOptions($ch);
             
             $response = curl_exec($ch);
+            if ($response === false) {
+                logError('Erro TLS/rede ao obter token Firebase', ['curl_error' => curl_error($ch)]);
+            }
             curl_close($ch);
             
             $data = json_decode($response, true);
@@ -123,7 +150,7 @@ class FirebaseIntegration {
             'Authorization: Bearer ' . $token,
             'Content-Type: application/json'
         ]);
-        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+        $this->applyTlsOptions($ch);
         
         if ($data) {
             curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
@@ -131,6 +158,9 @@ class FirebaseIntegration {
         
         $response = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        if ($response === false) {
+            logError('Erro TLS/rede na requisição Firestore', ['curl_error' => curl_error($ch), 'url' => $url]);
+        }
         curl_close($ch);
         
         if ($httpCode >= 200 && $httpCode < 300) {

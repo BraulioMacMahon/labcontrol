@@ -90,8 +90,8 @@ curl -X POST http://localhost/labcontrol-backend/api/hosts.php?action=set-creden
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer SEU_TOKEN_ADMIN" \
   -d '{
-    "username": "AdminLab17",
-    "password": "Insert@into17",
+    "username": "UTILIZADOR_ADMIN_DAS_ESTACOES",
+    "password": "SENHA_FORTE_AQUI",
     "description": "Credenciais padrão do domínio"
   }'
 ```
@@ -119,6 +119,12 @@ Set-Item WSMan:\localhost\Client\TrustedHosts -Value "*" -Force
 # Verificar status
 Test-WSMan
 ```
+
+> 🔐 **Autenticação:** o LabControl liga-se por WinRM com `-Authentication Negotiate`
+> (Kerberos em domínio, NTLM em grupo de trabalho). **Não** é necessário — nem recomendado —
+> ativar `Basic` ou `AllowUnencrypted` nos alvos: isso enviaria a senha do administrador em
+> texto claro pela rede a cada operação. Em grupo de trabalho, basta o servidor LabControl
+> constar na `TrustedHosts` das estações (comando acima).
 
 ### 5. Configurar Wake-on-LAN
 
@@ -242,11 +248,10 @@ curl -X POST http://localhost/labcontrol-backend/api/sync.php?action=force-sync 
 
 ## 👥 Usuários Padrão
 
-| Email | Senha | Perfil |
-|-------|-------|--------|
-| admin@labcontrol.local | admin123 | Admin |
-| operator1@labcontrol.local | operator123 | Operador |
-| operator2@labcontrol.local | operator123 | Operador |
+**Não existem utilizadores pré-criados.** O `database.sql` não semeia contas com senhas conhecidas.
+O primeiro administrador é criado com `labcontrol-backend/setup.php` (apenas a partir do localhost
+ou via CLI, só enquanto não existir nenhum utilizador; exige senha com 12+ caracteres). Operadores
+adicionais são criados por um admin via `POST auth.php?action=register`.
 
 ## 📝 Logs
 

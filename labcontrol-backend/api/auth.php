@@ -64,13 +64,13 @@ try {
     ob_end_clean();
 } catch (Throwable $e) {
     ob_end_clean(); // Clear any buffered output
+    // Detalhes só para o log do servidor — nunca expor caminho/linha/mensagem interna ao cliente
+    error_log("LabControl Bootstrap Error: " . $e->getMessage() . " in " . $e->getFile() . ":" . $e->getLine());
     http_response_code(500);
     header('Content-Type: application/json; charset=utf-8');
     echo json_encode([
         'success' => false,
-        'message' => $e->getMessage(),
-        'file' => $e->getFile(),
-        'line' => $e->getLine(),
+        'message' => 'Erro interno do servidor',
         'timestamp' => date('Y-m-d H:i:s')
     ], JSON_PRETTY_PRINT);
     exit;

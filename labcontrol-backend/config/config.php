@@ -104,8 +104,19 @@ define('ENCRYPTION_METHOD', 'AES-256-CBC');
 // =====================================================
 // CREDENCIAIS REMOTAS (Windows/Network)
 // =====================================================
-define('REMOTE_USER', env('REMOTE_USER', 'AdminLab17'));
-define('REMOTE_PASSWORD', env('REMOTE_PASSWORD', ''));
+// Sem fallback hardcoded: o nome da conta de administrador das estações é
+// informação sensível e deve vir exclusivamente do .env (ou das credenciais
+// por host guardadas encriptadas na base de dados).
+$remoteUser = env('REMOTE_USER', '');
+$remotePassword = env('REMOTE_PASSWORD', '');
+if ($remoteUser === '' || strpos($remoteUser, 'CHANGE_ME') === 0) {
+    $remoteUser = '';
+}
+if ($remotePassword === '' || strpos($remotePassword, 'CHANGE_ME') === 0) {
+    $remotePassword = '';
+}
+define('REMOTE_USER', $remoteUser);
+define('REMOTE_PASSWORD', $remotePassword);
 
 // =====================================================
 // CONFIGURAÇÕES DE LOG
@@ -139,7 +150,7 @@ define('RATE_LIMIT_WINDOW', (int)env('RATE_LIMIT_WINDOW', 300));
 // =====================================================
 // TIMEZONE
 // =====================================================
-$timezone = env('APP_TIMEZONE', 'America/Sao_Paulo');
+$timezone = env('APP_TIMEZONE', 'Africa/Luanda');
 if (!in_array($timezone, DateTimeZone::listIdentifiers())) {
     $timezone = 'UTC';
     error_log("⚠️ AVISO: Timezone inválido, usando UTC");
@@ -281,6 +292,125 @@ function getCorsOrigin() {
 
     // Not allowed - return first configured origin as safe fallback
     return $origins[0] ?? '*';
+}
+
+/**
+ * Cita um valor como literal PowerShell entre aspas SIMPLES.
+ *
+ * Dentro de aspas simples o PowerShell não expande `$var`, `$(expr)` nem
+ * sequências com crase — o único carácter especial é a própria aspa, que se
+ * escapa duplicando-a. É a forma segura de passar senhas, hostnames e
+ * argumentos vindos de fora para um script gerado dinamicamente.
+ */
+function psQuote($value) {
+    return "'" . str_replace("'", "''", (string) $value) . "'";
+}
+
+/**
+ * Valida um nome de computador antes de o usar em -ComputerName.
+ * Aceita hostnames NetBIOS/DNS e endereços IPv4/IPv6 (defesa em profundidade:
+ * mesmo que o registo tenha entrado na BD sem passar pela API, nunca chega ao
+ * PowerShell um valor com espaços, `;`, `|`, `$`, etc.).
+ */
+function isSafeComputerName($name) {
+    if (!is_string($name) || $name === '' || strlen($name) > 253) {
+        return false;
+    }
+    if (filter_var($name, FILTER_VALIDATE_IP)) {
+        return true;
+    }
+    return (bool) preg_match('/^[A-Za-z0-9](?:[A-Za-z0-9\-_.]*[A-Za-z0-9])?$/', $name);
+}
+
+/**
+ * Cria um ficheiro .ps1 temporário com nome imprevisível e permissões restritas.
+ *
+ * Substitui o padrão `'prefix_' . time() . '.ps1'`, que colidia quando duas
+ * requisições chegavam no mesmo segundo (uma apagava o script da outra) e
+ * tornava o caminho adivinhável. Devolve o caminho ou null em caso de falha.
+ */
+function createTempPsScript($prefix, $content) {
+    $dir = rtrim(sys_get_temp_dir(), '/\\');
+    $safePrefix = preg_replace('/[^a-z0-9_]/i', '', (string) $prefix);
+
+    for ($attempt = 0; $attempt < 5; $attempt++) {
+        $path = $dir . DIRECTORY_SEPARATOR . 'lc_' . $safePrefix . '_' . bin2hex(random_bytes(12)) . '.ps1';
+
+        // Modo 'x': cria o ficheiro em exclusivo e falha se já existir — sem janela
+        // de corrida entre "verificar" e "criar" (ao contrário de tempnam()+rename()).
+        $fh = @fopen($path, 'x');
+        if ($fh === false) {
+            continue; // colisão (astronomicamente improvável) → novo nome
+        }
+
+        @chmod($path, 0600);
+        // BOM UTF-8: o Windows PowerShell 5.1 lê .ps1 sem BOM como ANSI, o que
+        // corromperia senhas/hostnames com caracteres acentuados.
+        $ok = fwrite($fh, "\xEF\xBB\xBF" . $content) !== false;
+        fclose($fh);
+
+        if ($ok) {
+            return $path;
+        }
+        @unlink($path);
+        return null;
+    }
+    return null;
+}
+
+/**
+ * Gera o conteúdo de um script PowerShell que executa um comando remoto
+ * simples (shutdown/restart) via Invoke-Command com credenciais.
+ *
+ * - Senha e utilizador em aspas simples (sem expansão de `$` / crase).
+ * - Autenticação por Negotiate (Kerberos/NTLM). O antigo `-Authentication Basic`
+ *   enviava a senha do administrador praticamente em texto claro pela rede a
+ *   cada operação, e exige `AllowUnencrypted` nos alvos.
+ * - Código de saída fiável: antes, um Invoke-Command falhado devolvia 0 e a
+ *   operação era registada como "success" nos logs. Agora os erros são
+ *   recolhidos por computador (sem abortar os restantes num envio em massa) e o
+ *   script imprime `FAILED_HOSTS: a,b` e termina com 1 se algum falhou.
+ *
+ * @param string[] $computerNames Lista já validada com isSafeComputerName().
+ */
+function buildRemoteCommandScript(array $computerNames, $username, $password, $remoteCommand) {
+    $targets = implode(',', array_map('psQuote', $computerNames));
+    return
+        '$ErrorActionPreference = \'Continue\'' . "\r\n" .
+        '$pass = ConvertTo-SecureString -String ' . psQuote($password) . ' -AsPlainText -Force' . "\r\n" .
+        '$cred = New-Object System.Management.Automation.PSCredential(' . psQuote($username) . ', $pass)' . "\r\n" .
+        '$errs = @()' . "\r\n" .
+        'try {' . "\r\n" .
+        '    Invoke-Command -ComputerName @(' . $targets . ') -Credential $cred -Authentication Negotiate -ScriptBlock { ' . $remoteCommand . ' } -ErrorAction SilentlyContinue -ErrorVariable errs | Out-Null' . "\r\n" .
+        '} catch {' . "\r\n" .
+        '    $errs += $_' . "\r\n" .
+        '}' . "\r\n" .
+        'if ($errs.Count -gt 0) {' . "\r\n" .
+        '    $failed = @($errs | ForEach-Object {' . "\r\n" .
+        '        if ($_.OriginInfo -and $_.OriginInfo.PSComputerName) { [string]$_.OriginInfo.PSComputerName }' . "\r\n" .
+        '        elseif ($_.TargetObject -is [string]) { $_.TargetObject }' . "\r\n" .
+        '        else { \'\' }' . "\r\n" .
+        '    } | Where-Object { $_ } | Select-Object -Unique)' . "\r\n" .
+        '    Write-Output ("FAILED_HOSTS: " + ($failed -join \',\'))' . "\r\n" .
+        '    $errs | ForEach-Object { Write-Output ("ERRO: " + $_.Exception.Message) }' . "\r\n" .
+        '    exit 1' . "\r\n" .
+        '}' . "\r\n" .
+        'exit 0' . "\r\n";
+}
+
+/**
+ * Extrai da saída do script gerado por buildRemoteCommandScript() a lista de
+ * computadores que falharam (linha `FAILED_HOSTS: a,b`). Devolve [] se não
+ * conseguir determinar (nesse caso o chamador deve tratar o grupo todo como falhado).
+ */
+function parseFailedHostsFromOutput(array $output) {
+    foreach ($output as $line) {
+        if (preg_match('/^\s*FAILED_HOSTS:\s*(.*)$/i', $line, $m)) {
+            $names = array_filter(array_map('trim', explode(',', $m[1])), 'strlen');
+            return array_values(array_unique($names));
+        }
+    }
+    return [];
 }
 
 /**

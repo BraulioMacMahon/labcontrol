@@ -58,8 +58,9 @@ define('ENCRYPTION_METHOD', 'AES-256-CBC');
 // Como todos os hosts têm o mesmo admin, defina aqui as credenciais padrão
 // Estas serão usadas quando o host não tiver credenciais específicas
 // =====================================================
-define('DEFAULT_REMOTE_USER', 'AdminLab17'); // ou o nome do usuário admin da rede
-define('DEFAULT_REMOTE_PASSWORD', 'Insert@into17'); // Defina a senha padrão aqui ou configure via API
+// OBSOLETO: este ficheiro não é carregado. As credenciais vivem no .env (REMOTE_USER / REMOTE_PASSWORD).
+define('DEFAULT_REMOTE_USER', '');     // não colocar valores reais em ficheiros versionados
+define('DEFAULT_REMOTE_PASSWORD', ''); // configure via .env ou via API (set-credentials)
 
 // =====================================================
 // CONFIGURAÇÕES DE LOG

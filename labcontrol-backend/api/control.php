@@ -66,17 +66,29 @@ try {
         }
         
         $ip = $host['ip']; // Garantir IP para logs se necessário
+        
+        if (!isSafeComputerName($host['hostname'])) {
+            logError('Hostname inválido recusado em shutdown', ['host_id' => $host['id']]);
+            jsonResponse(false, 'Hostname do host contém caracteres inválidos. Corrija o registo do host.', null, 422);
+        }
+        
         $credentials = getHostCredentials($host);
+        if (empty($credentials['username']) || empty($credentials['password'])) {
+            jsonResponse(false, 'Credenciais remotas não configuradas para este host (defina REMOTE_USER/REMOTE_PASSWORD no .env ou credenciais por host).', null, 412);
+        }
         
-        // Criar um script temporário para evitar problemas de escape de caracteres na senha
-        $tempScript = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'shutdown_' . time() . '.ps1';
-        $psContent = '$pass = "' . str_replace('"', '`"', $credentials['password']) . '" | ConvertTo-SecureString -AsPlainText -Force; ' . "\r\n" .
-                     '$cred = New-Object System.Management.Automation.PSCredential("' . str_replace('"', '`"', $credentials['username']) . '", $pass); ' . "\r\n" .
-                     'Invoke-Command -ComputerName ' . $host['hostname'] . ' -Credential $cred -Authentication Basic -ScriptBlock { shutdown.exe /s /f /t 0 }';
+        // Script temporário (nome imprevisível, valores citados de forma segura, autenticação Negotiate)
+        $tempScript = createTempPsScript('shutdown', buildRemoteCommandScript(
+            [$host['hostname']],
+            $credentials['username'],
+            $credentials['password'],
+            'shutdown.exe /s /f /t 0'
+        ));
+        if ($tempScript === null) {
+            throw new Exception('Falha ao criar script temporário');
+        }
         
-        file_put_contents($tempScript, $psContent);
-        
-        $fullCommand = "powershell.exe -ExecutionPolicy Bypass -File \"$tempScript\" 2>&1";
+        $fullCommand = 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ' . escapeshellarg($tempScript) . ' 2>&1';
         
         $output = [];
         $returnCode = 0;
@@ -96,7 +108,7 @@ try {
             $payload['email'],
             $host['id'],
             $ip,
-            'Desligamento remoto (Script Temp)',
+            'Desligamento remoto',
             'control',
             json_encode(['output' => $output]),
             $success ? 'success' : 'failed'
@@ -108,7 +120,7 @@ try {
                 'ip' => $ip
             ]);
         } else {
-            jsonResponse(false, 'Falha ao executar desligamento. Verifique se o WinRM aceita Basic Auth e se o usuário tem permissão.', [
+            jsonResponse(false, 'Falha ao executar desligamento. Verifique se o WinRM está ativo no alvo e se o usuário tem permissão.', [
                 'error' => implode("\n", $output)
             ], 500);
         }
@@ -137,17 +149,29 @@ try {
         }
         
         $ip = $host['ip'];
+        
+        if (!isSafeComputerName($host['hostname'])) {
+            logError('Hostname inválido recusado em restart', ['host_id' => $host['id']]);
+            jsonResponse(false, 'Hostname do host contém caracteres inválidos. Corrija o registo do host.', null, 422);
+        }
+        
         $credentials = getHostCredentials($host);
+        if (empty($credentials['username']) || empty($credentials['password'])) {
+            jsonResponse(false, 'Credenciais remotas não configuradas para este host (defina REMOTE_USER/REMOTE_PASSWORD no .env ou credenciais por host).', null, 412);
+        }
         
-        // Criar um script temporário para evitar problemas de escape de caracteres na senha
-        $tempScript = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'restart_' . time() . '.ps1';
-        $psContent = '$pass = "' . str_replace('"', '`"', $credentials['password']) . '" | ConvertTo-SecureString -AsPlainText -Force; ' . "\r\n" .
-                     '$cred = New-Object System.Management.Automation.PSCredential("' . str_replace('"', '`"', $credentials['username']) . '", $pass); ' . "\r\n" .
-                     'Invoke-Command -ComputerName ' . $host['hostname'] . ' -Credential $cred -Authentication Basic -ScriptBlock { shutdown.exe /r /f /t 0 }';
+        // Script temporário (nome imprevisível, valores citados de forma segura, autenticação Negotiate)
+        $tempScript = createTempPsScript('restart', buildRemoteCommandScript(
+            [$host['hostname']],
+            $credentials['username'],
+            $credentials['password'],
+            'shutdown.exe /r /f /t 0'
+        ));
+        if ($tempScript === null) {
+            throw new Exception('Falha ao criar script temporário');
+        }
         
-        file_put_contents($tempScript, $psContent);
-        
-        $fullCommand = "powershell.exe -ExecutionPolicy Bypass -File \"$tempScript\" 2>&1";
+        $fullCommand = 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ' . escapeshellarg($tempScript) . ' 2>&1';
         
         $output = [];
         $returnCode = 0;
@@ -167,7 +191,7 @@ try {
             $payload['email'],
             $host['id'],
             $ip,
-            'Reinício remoto (Script Temp)',
+            'Reinício remoto',
             'control',
             json_encode(['output' => $output]),
             $success ? 'success' : 'failed'
@@ -179,7 +203,7 @@ try {
                 'ip' => $ip
             ]);
         } else {
-            jsonResponse(false, 'Falha ao executar reinício. Verifique se o WinRM no computador alvo aceita Basic Auth e se o usuário tem permissão.', [
+            jsonResponse(false, 'Falha ao executar reinício. Verifique se o WinRM está ativo no alvo e se o usuário tem permissão.', [
                 'error' => implode("\n", $output)
             ], 500);
         }
@@ -370,32 +394,19 @@ try {
         
         $scriptPath = $powershellPath . 'Get-Processes.ps1';
         
-        $tempScript = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'get_proc_' . time() . '.ps1';
-        
-        if (empty($tempScript)) {
-            throw new Exception("Falha ao gerar caminho do script temporário");
-        }
-        
         // Usar aspas simples no PowerShell para evitar expansão de variáveis ($) na senha
-        $psContent = 'powershell.exe -ExecutionPolicy Bypass -File \'' . str_replace("'", "''", $scriptPath) . '\' ' .
-                     '-ComputerName \'' . str_replace("'", "''", $host['hostname']) . '\' ' .
-                     '-Username \'' . str_replace("'", "''", $credentials['username']) . '\' ' .
-                     '-Password \'' . str_replace("'", "''", $credentials['password']) . '\'';
+        $psContent = 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ' . psQuote($scriptPath) . ' ' .
+                     '-ComputerName ' . psQuote($host['hostname']) . ' ' .
+                     '-Username ' . psQuote($credentials['username']) . ' ' .
+                     '-Password ' . psQuote($credentials['password']);
         
-        if (empty($psContent)) {
-            throw new Exception("Conteúdo do comando PowerShell está vazio");
+        $tempScript = createTempPsScript('get_proc', $psContent);
+        if ($tempScript === null) {
+            logError("Falha ao escrever script temporário", ['sys_temp' => sys_get_temp_dir()]);
+            throw new Exception("Falha ao escrever script temporário");
         }
         
-        if (file_put_contents($tempScript, $psContent) === false) {
-            logError("Falha ao escrever script temporário", [
-                'tempScript' => $tempScript,
-                'psContent_length' => strlen($psContent),
-                'sys_temp' => sys_get_temp_dir()
-            ]);
-            throw new Exception("Falha ao escrever script temporário em: " . $tempScript);
-        }
-        
-        $fullCommand = "powershell.exe -ExecutionPolicy Bypass -File \"$tempScript\" 2>&1";
+        $fullCommand = 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ' . escapeshellarg($tempScript) . ' 2>&1';
         
         $output = [];
         $returnCode = 0;
@@ -489,19 +500,20 @@ try {
         
         $forceParam = $force ? '-Force' : '';
         
-        // Criar um script temporário para evitar problemas de escape de caracteres na senha
-        $tempScript = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'kill_' . time() . '.ps1';
-        
         // Usar aspas simples no PowerShell para evitar expansão de variáveis ($) na senha
-        $psContent = 'powershell.exe -ExecutionPolicy Bypass -File \'' . str_replace("'", "''", $scriptPath) . '\' ' .
-                     '-ComputerName \'' . str_replace("'", "''", $host['hostname']) . '\' ' .
-                     '-Username \'' . str_replace("'", "''", $credentials['username']) . '\' ' .
-                     '-Password \'' . str_replace("'", "''", $credentials['password']) . '\' ' .
+        $psContent = 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ' . psQuote($scriptPath) . ' ' .
+                     '-ComputerName ' . psQuote($host['hostname']) . ' ' .
+                     '-Username ' . psQuote($credentials['username']) . ' ' .
+                     '-Password ' . psQuote($credentials['password']) . ' ' .
                      $targetParam . ' ' . $forceParam;
         
-        file_put_contents($tempScript, $psContent);
+        // Script temporário com nome imprevisível (evita colisões e caminhos adivinháveis)
+        $tempScript = createTempPsScript('kill', $psContent);
+        if ($tempScript === null) {
+            throw new Exception('Falha ao criar script temporário');
+        }
         
-        $fullCommand = "powershell.exe -ExecutionPolicy Bypass -File \"$tempScript\" 2>&1";
+        $fullCommand = 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ' . escapeshellarg($tempScript) . ' 2>&1';
         
         $output = [];
         $returnCode = 0;
@@ -587,17 +599,20 @@ try {
         
         $scriptPath = $powershellPath . 'Execute-Command.ps1';
         
-        // Usar script temporário para evitar problemas de escape de caracteres na senha
-        $tempScript = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'exec_cmd_' . time() . '.ps1';
-        $psContent = 'powershell.exe -ExecutionPolicy Bypass -File \'' . str_replace("'", "''", $scriptPath) . '\' ' .
-                     '-ComputerName \'' . str_replace("'", "''", $host['hostname']) . '\' ' .
-                     '-Username \'' . str_replace("'", "''", $credentials['username']) . '\' ' .
-                     '-Password \'' . str_replace("'", "''", $credentials['password']) . '\' ' .
-                     '-Command \'' . str_replace("'", "''", $command) . '\'';
+        // Usar aspas simples no PowerShell para evitar expansão de variáveis ($) na senha
+        $psContent = 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ' . psQuote($scriptPath) . ' ' .
+                     '-ComputerName ' . psQuote($host['hostname']) . ' ' .
+                     '-Username ' . psQuote($credentials['username']) . ' ' .
+                     '-Password ' . psQuote($credentials['password']) . ' ' .
+                     '-Command ' . psQuote($command);
         
-        file_put_contents($tempScript, $psContent);
+        // Script temporário com nome imprevisível (evita colisões e caminhos adivinháveis)
+        $tempScript = createTempPsScript('exec_cmd', $psContent);
+        if ($tempScript === null) {
+            throw new Exception('Falha ao criar script temporário');
+        }
         
-        $fullCommand = "powershell.exe -ExecutionPolicy Bypass -File \"$tempScript\" 2>&1";
+        $fullCommand = 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ' . escapeshellarg($tempScript) . ' 2>&1';
         
         $output = [];
         $returnCode = 0;
@@ -656,9 +671,25 @@ try {
 
         // Agrupar hosts por credenciais para execução paralela via Invoke-Command
         $groups = [];
+        $successCount = 0;
+        $failedCount = 0;
+        $failedHosts = [];
+
         foreach ($activeHosts as $host) {
+            // Defesa em profundidade: nunca passar ao PowerShell um hostname com caracteres inesperados
+            if (!isSafeComputerName($host['hostname'])) {
+                $failedCount++;
+                $failedHosts[] = ['hostname' => $host['hostname'], 'id' => $host['id'], 'reason' => 'hostname inválido'];
+                continue;
+            }
             $creds = getHostCredentials($host);
-            $key = base64_encode($creds['username'] . '|' . $creds['password']);
+            if (empty($creds['username']) || empty($creds['password'])) {
+                $failedCount++;
+                $failedHosts[] = ['hostname' => $host['hostname'], 'id' => $host['id'], 'reason' => 'sem credenciais'];
+                continue;
+            }
+            // Chave de agrupamento opaca (hash) — a senha em claro não deve andar em chaves de array/logs
+            $key = hash('sha256', $creds['username'] . "\0" . $creds['password']);
             if (!isset($groups[$key])) {
                 $groups[$key] = [
                     'username' => $creds['username'],
@@ -671,42 +702,55 @@ try {
             $groups[$key]['ids'][] = $host['id'];
         }
 
-        $successCount = 0;
-        $failedCount = 0;
-        $failedHosts = [];
-
         foreach ($groups as $group) {
-            $hostList = '"' . implode('","', $group['hostnames']) . '"';
+            $tempScript = createTempPsScript('shutdown_bulk', buildRemoteCommandScript(
+                $group['hostnames'],
+                $group['username'],
+                $group['password'],
+                'shutdown.exe /s /f /t 0'
+            ));
+            if ($tempScript === null) {
+                $failedCount += count($group['ids']);
+                foreach ($group['hostnames'] as $index => $name) {
+                    $failedHosts[] = ['hostname' => $name, 'id' => $group['ids'][$index], 'reason' => 'falha ao criar script'];
+                }
+                continue;
+            }
             
-            $tempScript = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'shutdown_bulk_' . uniqid() . '.ps1';
-            $psContent = sprintf(
-                '$pass = "%s" | ConvertTo-SecureString -AsPlainText -Force; ' . "\r\n" .
-                '$cred = New-Object System.Management.Automation.PSCredential("%s", $pass); ' . "\r\n" .
-                'Invoke-Command -ComputerName %s -Credential $cred -Authentication Basic -ScriptBlock { shutdown.exe /s /f /t 0 } -ErrorAction SilentlyContinue',
-                str_replace('"', '`"', $group['password']),
-                str_replace('"', '`"', $group['username']),
-                $hostList
-            );
-            
-            file_put_contents($tempScript, $psContent);
-            
-            $fullCommand = "powershell.exe -ExecutionPolicy Bypass -File \"$tempScript\" 2>&1";
+            $output = [];
+            $returnCode = 0;
+            $fullCommand = 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ' . escapeshellarg($tempScript) . ' 2>&1';
             exec($fullCommand, $output, $returnCode);
             @unlink($tempScript);
             
-            // Como Invoke-Command pode ter sucesso parcial, o returnCode nem sempre é confiável para o grupo todo.
-            // Mas para fins de log simplificado, consideramos o retorno do comando principal.
+            // O script devolve 0 só se todos os alvos tiveram sucesso; em caso de falha
+            // parcial imprime "FAILED_HOSTS: a,b" para podermos marcar host a host.
             if ($returnCode === 0) {
                 $successCount += count($group['ids']);
                 foreach ($group['ids'] as $id) {
                     $db->updateHostStatus($id, 'offline');
                 }
-            } else {
-                $failedCount += count($group['ids']);
-                foreach ($group['hostnames'] as $index => $name) {
-                    $failedHosts[] = ['hostname' => $name, 'id' => $group['ids'][$index]];
+                continue;
+            }
+
+            $failedNames = parseFailedHostsFromOutput($output);
+            if (empty($failedNames)) {
+                // Não foi possível identificar quais falharam → tratar o grupo todo como falhado
+                $failedNames = $group['hostnames'];
+            }
+            $failedLookup = array_change_key_case(array_flip($failedNames), CASE_LOWER);
+
+            foreach ($group['hostnames'] as $index => $name) {
+                $id = $group['ids'][$index];
+                if (isset($failedLookup[strtolower($name)])) {
+                    $failedCount++;
+                    $failedHosts[] = ['hostname' => $name, 'id' => $id, 'reason' => 'falha na execução remota'];
+                } else {
+                    $successCount++;
+                    $db->updateHostStatus($id, 'offline');
                 }
             }
+            logError('Falha parcial no desligamento em massa', ['failed' => $failedNames, 'output' => array_slice($output, 0, 20)]);
         }
 
         $db->logAction(
@@ -804,16 +848,19 @@ function getHostDetails($host) {
     $scriptPath = __DIR__ . '/../powershell/Get-SystemInfo.ps1';
     $credentials = getHostCredentials($host);
 
-    // Usar script temporário para evitar problemas de escape de caracteres na senha
-    $tempScript = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'get_details_' . time() . '.ps1';
-    $psContent = 'powershell.exe -ExecutionPolicy Bypass -File \'' . str_replace("'", "''", $scriptPath) . '\' ' .
-                 '-ComputerName \'' . str_replace("'", "''", $host['ip']) . '\' ' .
-                 '-Username \'' . str_replace("'", "''", $credentials['username']) . '\' ' .
-                 '-Password \'' . str_replace("'", "''", $credentials['password']) . '\'';
+    // Usar aspas simples no PowerShell para evitar expansão de variáveis ($) na senha
+    $psContent = 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ' . psQuote($scriptPath) . ' ' .
+                 '-ComputerName ' . psQuote($host['ip']) . ' ' .
+                 '-Username ' . psQuote($credentials['username']) . ' ' .
+                 '-Password ' . psQuote($credentials['password']);
 
-    file_put_contents($tempScript, $psContent);
+    // Script temporário com nome imprevisível (evita colisões e caminhos adivinháveis)
+    $tempScript = createTempPsScript('get_details', $psContent);
+    if ($tempScript === null) {
+        return null;
+    }
 
-    $fullCommand = "powershell.exe -ExecutionPolicy Bypass -File \"$tempScript\" 2>&1";
+    $fullCommand = 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ' . escapeshellarg($tempScript) . ' 2>&1';
 
     $output = [];
     $returnCode = 0;

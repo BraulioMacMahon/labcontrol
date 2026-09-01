@@ -70,7 +70,7 @@ function Invoke-RemoteCommand {
         
         if ($Credential -ne $null) {
             $sessionParams['Credential'] = $Credential
-            $sessionParams['Authentication'] = 'Basic'
+            $sessionParams['Authentication'] = 'Negotiate'  # Kerberos/NTLM: nunca Basic (senha em claro na rede)
         }
         
         $session = New-PSSession @sessionParams

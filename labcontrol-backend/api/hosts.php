@@ -512,7 +512,8 @@ switch ($action) {
             
         } catch (Exception $e) {
             $db->rollback();
-            jsonResponse(false, 'Erro na importação: ' . $e->getMessage(), null, 500);
+            logError('Erro na importação de hosts', ['error' => $e->getMessage()]);
+            jsonResponse(false, 'Erro na importação. Consulte os logs do servidor.', null, 500);
         }
         break;
     
