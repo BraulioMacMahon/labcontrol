@@ -206,6 +206,7 @@ class LabControlApp {
     }
 
     async init() {
+        window.addEventListener('api:unauthorized', (e) => this.handleUnauthorized(e.detail));
         await this.checkSession();
         this.startSyncTimer();
         this.startNetworkMonitor();
@@ -247,11 +248,16 @@ class LabControlApp {
         const token = localStorage.getItem('labcontrol_token');
         if (token) {
             try {
-                await api.verifyToken();
-                this.isAuthenticated = true;
+                const res = await api.verifyToken();
+                if (!res || !res.success) throw new Error(res?.message || 'Sessão inválida');
                 await this.enterApp();
             } catch (error) {
+                api.clearAuth();
                 this.showAuth();
+                if (!error?.isAuthError) {
+                    // Erro de rede/servidor (não é simplesmente "sessão expirada") — dizer ao utilizador
+                    this.notify('Não foi possível validar a sessão: ' + (error?.message || 'erro desconhecido'), 'error', 6000);
+                }
             }
         } else {
             this.showAuth();
@@ -260,6 +266,8 @@ class LabControlApp {
 
     showAuth() {
         this.isAuthenticated = false;
+        if (this.sessionTimer) clearTimeout(this.sessionTimer);
+        if (this.sessionInterval) clearInterval(this.sessionInterval);
         const overlay = document.getElementById('auth-overlay');
         overlay.innerHTML = Components.AuthUI();
         overlay.classList.remove('opacity-0', 'pointer-events-none');
@@ -269,6 +277,17 @@ class LabControlApp {
             e.preventDefault();
             this.handleLogin();
         });
+    }
+
+    /**
+     * Chamado quando o backend rejeita o token (evento 'api:unauthorized').
+     * Em vez de recarregar a página em silêncio (ciclo infinito quando o token
+     * é rejeitado logo após o login), volta ao ecrã de login com uma mensagem.
+     */
+    handleUnauthorized(detail) {
+        if (!this.isAuthenticated) return; // já estamos no login
+        this.showAuth();
+        this.notify('🔒 Sessão terminada: ' + (detail?.message || 'token rejeitado pelo servidor'), 'error', 7000);
     }
 
     async enterApp() {
@@ -620,16 +639,40 @@ class LabControlApp {
     escapeHtml(t) { const d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
 
     async handleLogin() {
-        const email = document.getElementById('login-email').value;
+        const email = document.getElementById('login-email').value.trim();
         const password = document.getElementById('login-password').value;
         const btn = document.getElementById('auth-submit');
         if (!email || !password) return this.notify('Preencha os campos', 'error');
+        const restoreBtn = () => { btn.disabled = false; btn.innerText = 'Initialize System'; };
         btn.disabled = true; btn.innerText = 'Autenticando...';
         try {
             const res = await api.login(email, password);
-            if (res?.success) { this.notify('Bem-vindo!', 'success'); await this.enterApp(); }
-            else { this.notify(res?.message || 'Falha no login', 'error'); btn.disabled = false; btn.innerText = 'Initialize System'; }
-        } catch (e) { this.notify('Erro inesperado', 'error'); btn.disabled = false; }
+            if (!res?.success) {
+                this.notify(res?.message || 'Falha no login', 'error', 6000);
+                return restoreBtn();
+            }
+
+            // Confirmar que o token emitido é aceite pelo backend ANTES de entrar na app.
+            // Se falhar aqui, o problema é de configuração do servidor (JWT_SECRET instável,
+            // header Authorization bloqueado pelo Apache...) e não das credenciais —
+            // mostrar isso explicitamente em vez de recarregar a página em ciclo.
+            btn.innerText = 'A validar sessão...';
+            try {
+                const check = await api.verifyToken();
+                if (!check || !check.success) throw new Error(check?.message || 'token rejeitado');
+            } catch (verifyErr) {
+                api.clearAuth();
+                this.notify('⚠️ Credenciais corretas, mas o servidor rejeitou a sessão logo a seguir (' +
+                    (verifyErr?.message || 'erro') + '). Verifique JWT_SECRET no .env e o header Authorization no Apache.', 'error', 12000);
+                return restoreBtn();
+            }
+
+            this.notify('Bem-vindo!', 'success');
+            await this.enterApp();
+        } catch (e) {
+            this.notify('Erro inesperado: ' + (e?.message || e), 'error', 6000);
+            restoreBtn();
+        }
     }
 
     async handleShutdown(hostname) {

@@ -42,8 +42,7 @@ try {
     }
 
     // Verificar autenticação
-    $headers = getallheaders();
-    $token = str_replace('Bearer ', '', $headers['Authorization'] ?? '');
+    $token = getBearerToken();
     $payload = validateJWT($token);
 
     if (!$payload) {

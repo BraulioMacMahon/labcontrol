@@ -51,19 +51,22 @@ function lcEnsureEnvSecrets() {
     $content = (string) file_get_contents($envPath);
     $changed = false;
 
-    // JWT_SECRET: ausente, curto ou igual ao placeholder fraco do exemplo -> gera forte
-    $jwt = lcGetEnvValue($content, 'JWT_SECRET');
-    if ($jwt === null || strlen($jwt) < 32 ||
-        strpos($jwt, 'change_this') !== false || strpos($jwt, 'labcontrol_secure_key') !== false) {
-        lcSetEnvValue($content, 'JWT_SECRET', bin2hex(random_bytes(32)));
-        $changed = true;
-    }
+    // Mesmo critério de "fraco" que o config.php (labcontrolIsWeakSecret): ausente, curto
+    // ou placeholder do repositório. Assim setup.php e config.php nunca discordam.
+    $isWeak = function ($v) {
+        $v = trim((string) $v);
+        if (strlen($v) < 16) return true;
+        foreach (['change_this', 'labcontrol_secure_key', 'change_me', 'your_secret', 'example'] as $p) {
+            if (stripos($v, $p) !== false) return true;
+        }
+        return false;
+    };
 
-    // ENCRYPTION_KEY: ausente ou curto -> gera forte
-    $enc = lcGetEnvValue($content, 'ENCRYPTION_KEY');
-    if ($enc === null || strlen($enc) < 16) {
-        lcSetEnvValue($content, 'ENCRYPTION_KEY', bin2hex(random_bytes(32)));
-        $changed = true;
+    foreach (['JWT_SECRET', 'ENCRYPTION_KEY'] as $key) {
+        if ($isWeak(lcGetEnvValue($content, $key))) {
+            lcSetEnvValue($content, $key, bin2hex(random_bytes(32)));
+            $changed = true;
+        }
     }
 
     if ($changed) {
@@ -117,11 +120,15 @@ try {
 
     $count = $db->selectOne("SELECT COUNT(*) as c FROM users");
     if ((int)($count['c'] ?? 0) > 0) {
-        http_response_code(200);
+        // NÃO é um login nem cria/altera nada: o setup só serve para o PRIMEIRO admin.
+        // Devolve 409 para ficar claro que nenhuma ação foi realizada.
+        http_response_code(409);
         echo json_encode([
-            'success' => true,
-            'message' => 'Sistema já configurado (já existem usuários). Nenhuma ação realizada.'
-        ]);
+            'success' => false,
+            'message' => 'Sistema já configurado (' . (int)$count['c'] . ' utilizador(es) existentes). Nenhuma ação realizada. ' .
+                         'Este script NÃO faz login. Para gerir contas use: php labcontrol-backend/cli/users.php ' .
+                         '(list | create | set-password | activate | check-login | check-config).'
+        ], JSON_UNESCAPED_UNICODE);
         exit;
     }
 

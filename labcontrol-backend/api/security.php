@@ -44,8 +44,7 @@ try {
             }
             
             // VERIFICAR SE UTILIZADOR É ADMIN
-            $headers = getallheaders();
-            $token = str_replace('Bearer ', '', $headers['Authorization'] ?? '');
+            $token = getBearerToken();
             
             if (!$token) {
                 http_response_code(401);
@@ -114,8 +113,7 @@ try {
             }
             
             // VERIFICAR SE UTILIZADOR É ADMIN
-            $headers = getallheaders();
-            $token = str_replace('Bearer ', '', $headers['Authorization'] ?? '');
+            $token = getBearerToken();
             
             if (!$token) {
                 http_response_code(401);

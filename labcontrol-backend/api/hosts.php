@@ -26,8 +26,7 @@ $action = $_GET['action'] ?? '';
 $method = $_SERVER['REQUEST_METHOD'];
 
 // Verificar autenticação
-$headers = getallheaders();
-$token = str_replace('Bearer ', '', $headers['Authorization'] ?? '');
+$token = getBearerToken();
 $payload = validateJWT($token);
 
 if (!$payload) {

@@ -13,25 +13,104 @@ if (!defined('LABCONTROL')) {
 // =====================================================
 require_once __DIR__ . '/../bootstrap/env.php';
 
-// Persiste uma chave de segredo no .env (self-bootstrap), criando o arquivo se necessário.
-// Gera chaves ÚNICAS por instalação em vez de usar valores hardcoded do repositório.
+/**
+ * Persiste uma chave no .env (self-bootstrap), criando o arquivo se necessário.
+ *
+ * IMPORTANTE: substitui o valor se a chave já existir (mesmo vazia ou fraca) e
+ * remove linhas duplicadas. A versão anterior só ACRESCENTAVA quando a chave não
+ * existia; com `JWT_SECRET=` vazio no .env, cada request gerava um segredo novo
+ * sem o gravar → o token do login era rejeitado no request seguinte e o frontend
+ * voltava ao ecrã de login em ciclo ("não passa da tela de login").
+ */
 function labcontrolPersistEnv($key, $value) {
     $envFile = __DIR__ . '/../../.env';
-    if (file_exists($envFile)) {
-        if (!is_writable($envFile)) {
-            error_log("⚠️ AVISO: não foi possível persistir {$key} no .env (sem permissão). Execute setup.php.");
+    $exampleFile = __DIR__ . '/../../.env.example';
+
+    if (!file_exists($envFile)) {
+        $base = file_exists($exampleFile) ? (string) file_get_contents($exampleFile) : '';
+        if (@file_put_contents($envFile, $base, LOCK_EX) === false) {
+            error_log("❌ LabControl: não foi possível criar {$envFile} para gravar {$key}.");
             return false;
         }
-        $content = file_get_contents($envFile);
-        if (strpos($content, $key . '=') === false) {
-            file_put_contents($envFile, rtrim($content) . "\n{$key}={$value}\n");
-        }
-    } else {
-        $example = __DIR__ . '/../../.env.example';
-        $base = file_exists($example) ? file_get_contents($example) : '';
-        file_put_contents($envFile, rtrim($base) . "\n{$key}={$value}\n");
     }
-    return true;
+    if (!is_writable($envFile)) {
+        error_log("❌ LabControl: {$envFile} não é gravável pelo servidor web; não foi possível persistir {$key}.");
+        return false;
+    }
+
+    $content = (string) file_get_contents($envFile);
+    $line = $key . '=' . $value;
+    $pattern = '/^[ \t]*' . preg_quote($key, '/') . '[ \t]*=.*$/m';
+    $count = 0;
+    $content = preg_replace_callback($pattern, function () use ($line, &$count) {
+        $count++;
+        return $count === 1 ? $line : ''; // 1.ª ocorrência: substitui; duplicadas: remove
+    }, $content);
+    if ($count === 0) {
+        $content = rtrim($content) . "\n" . $line . "\n";
+    }
+
+    return @file_put_contents($envFile, $content, LOCK_EX) !== false;
+}
+
+/**
+ * Um segredo é "fraco" se estiver vazio, for curto ou for um placeholder do
+ * repositório (nunca assinar tokens com um valor público).
+ */
+function labcontrolIsWeakSecret($value) {
+    $v = trim((string) $value);
+    if (strlen($v) < 16) {
+        return true;
+    }
+    foreach (['change_this', 'labcontrol_secure_key', 'change_me', 'your_secret', 'example'] as $placeholder) {
+        if (stripos($v, $placeholder) !== false) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * Erro de configuração irrecuperável: responde de forma clara (JSON na web,
+ * stderr na CLI) em vez de continuar com um estado que só falha mais à frente.
+ */
+function labcontrolFatalConfig($message) {
+    error_log('❌ LabControl configuração: ' . $message);
+    if (PHP_SAPI === 'cli' || PHP_SAPI === 'phpdbg') {
+        fwrite(STDERR, "ERRO DE CONFIGURAÇÃO: {$message}\n");
+        exit(1);
+    }
+    if (ob_get_length()) {
+        ob_clean();
+    }
+    http_response_code(500);
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode(['success' => false, 'message' => 'Erro de configuração: ' . $message], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+/**
+ * Garante que um segredo existe, é forte e está PERSISTIDO (estável entre requests).
+ * Se não for possível gravar, falha de forma explícita — um segredo aleatório por
+ * request seria pior (login "funciona" e tudo o resto dá 401).
+ */
+function labcontrolEnsureSecret($key) {
+    $value = env($key, null);
+    if (!labcontrolIsWeakSecret($value)) {
+        return (string) $value;
+    }
+    $value = bin2hex(random_bytes(32));
+    if (!labcontrolPersistEnv($key, $value)) {
+        labcontrolFatalConfig(
+            "{$key} ausente/fraco e o ficheiro .env não é gravável pelo servidor web. " .
+            "Defina {$key} no .env (ex.: php labcontrol-backend/cli/users.php check-config) ou dê permissão de escrita."
+        );
+    }
+    $_ENV[$key] = $value;
+    $_SERVER[$key] = $value;
+    putenv("{$key}={$value}");
+    error_log("ℹ️ LabControl: {$key} gerado e gravado no .env (instalação nova ou valor fraco substituído).");
+    return $value;
 }
 
 $envPath = __DIR__ . '/../../.env';
@@ -66,17 +145,21 @@ define('FIREBASE_CREDENTIALS_PATH', __DIR__ . '/../' . env('FIREBASE_CREDENTIALS
 // =====================================================
 // CONFIGURAÇÕES DE SEGURANÇA
 // =====================================================
-define('SESSION_TIMEOUT', (int)env('SESSION_TIMEOUT', 3600));
+// Duração do token JWT. Um valor vazio/0 no .env (ex.: "SESSION_TIMEOUT=") fazia
+// (int)'' = 0 → exp = agora → o token expirava no segundo seguinte ao login.
+$sessionTimeout = (int) env('SESSION_TIMEOUT', 3600);
+if ($sessionTimeout < 60) {
+    error_log("⚠️ LabControl: SESSION_TIMEOUT inválido ({$sessionTimeout}s); a usar 3600s.");
+    $sessionTimeout = 3600;
+}
+define('SESSION_TIMEOUT', $sessionTimeout);
 define('MAX_LOGIN_ATTEMPTS', (int)env('MAX_LOGIN_ATTEMPTS', 5));
 define('LOGIN_LOCKOUT_TIME', (int)env('LOGIN_LOCKOUT_TIME', 900));
 
-// JWT Secret - CRÍTICO! Gera e persiste se ausente (self-bootstrap).
-$jwtSecret = env('JWT_SECRET', null);
-if (empty($jwtSecret) || strlen($jwtSecret) < 16) {
-    $jwtSecret = bin2hex(random_bytes(32));
-    labcontrolPersistEnv('JWT_SECRET', $jwtSecret);
-}
-define('JWT_SECRET', $jwtSecret);
+// JWT Secret - CRÍTICO! Tem de ser forte E estável entre requests (assina as sessões).
+// Se ausente/fraco/placeholder, gera um e grava-o no .env; se não conseguir gravar, falha
+// explicitamente (nunca usar um segredo diferente por request).
+define('JWT_SECRET', labcontrolEnsureSecret('JWT_SECRET'));
 
 // =====================================================
 // CONFIGURAÇÕES DE REDE
@@ -91,14 +174,10 @@ define('API_TIMEOUT', (int)env('API_TIMEOUT', 15000));
 // CRIPTOGRAFIA
 // =====================================================
 // Sem fallback hardcoded no código (evita chave pública no repositório).
-// Se ausente/inválida, gera uma CHAVE ÚNICA por instalação e a persiste no .env
-// (self-bootstrap), para não quebrar o backend nem reintroduzir chave conhecida.
-$encryptionKey = env('ENCRYPTION_KEY', null);
-if (empty($encryptionKey) || strlen($encryptionKey) < 16) {
-    $encryptionKey = bin2hex(random_bytes(32));
-    labcontrolPersistEnv('ENCRYPTION_KEY', $encryptionKey);
-}
-define('ENCRYPTION_KEY', $encryptionKey);
+// Se ausente/inválida, gera uma CHAVE ÚNICA por instalação e persiste-a no .env.
+// Tal como o JWT_SECRET, tem de ser estável: uma chave nova por request tornaria
+// ilegíveis todas as senhas de hosts já guardadas.
+define('ENCRYPTION_KEY', labcontrolEnsureSecret('ENCRYPTION_KEY'));
 define('ENCRYPTION_METHOD', 'AES-256-CBC');
 
 // =====================================================
@@ -205,7 +284,55 @@ function generateJWT($payload) {
     return $base64Header . "." . $base64Payload . "." . $base64Signature;
 }
 
+/**
+ * Obtém o token Bearer do request de forma robusta.
+ *
+ * O padrão antigo `getallheaders()['Authorization']` falha em vários cenários
+ * comuns no XAMPP/Apache: o header chega em minúsculas, é removido pelo Apache
+ * em CGI/FastCGI (só disponível via REDIRECT_HTTP_AUTHORIZATION com a regra do
+ * .htaccess), ou getallheaders() nem existe. Resultado típico: o login devolve
+ * um token válido, mas `verify`/`hosts.php` respondem 401 → o frontend limpa o
+ * token e volta ao ecrã de login ("o botão recarrega mas não avança").
+ */
+function getBearerToken() {
+    $candidates = [];
+
+    foreach (['HTTP_AUTHORIZATION', 'REDIRECT_HTTP_AUTHORIZATION', 'REDIRECT_REDIRECT_HTTP_AUTHORIZATION'] as $k) {
+        if (!empty($_SERVER[$k])) {
+            $candidates[] = $_SERVER[$k];
+        }
+    }
+
+    if (function_exists('apache_request_headers')) {
+        $h = apache_request_headers();
+        if (is_array($h)) {
+            foreach ($h as $name => $value) {
+                if (strcasecmp($name, 'Authorization') === 0 && !empty($value)) {
+                    $candidates[] = $value;
+                }
+            }
+        }
+    } elseif (function_exists('getallheaders')) {
+        $h = getallheaders();
+        if (is_array($h)) {
+            foreach ($h as $name => $value) {
+                if (strcasecmp($name, 'Authorization') === 0 && !empty($value)) {
+                    $candidates[] = $value;
+                }
+            }
+        }
+    }
+
+    foreach ($candidates as $header) {
+        if (preg_match('/^\s*Bearer\s+(\S+)\s*$/i', $header, $m)) {
+            return $m[1];
+        }
+    }
+    return '';
+}
+
 function validateJWT($token, $ignoreExpiration = false) {
+    if (!is_string($token) || $token === '') return false;
     $parts = explode('.', $token);
     if (count($parts) != 3) return false;
     

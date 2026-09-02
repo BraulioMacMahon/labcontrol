@@ -250,8 +250,7 @@ switch ($action) {
         }
         
         // Obter token
-        $headers = getallheaders();
-        $token = str_replace('Bearer ', '', $headers['Authorization'] ?? '');
+        $token = getBearerToken();
         
         if ($token) {
             $payload = validateJWT($token);
@@ -282,8 +281,7 @@ switch ($action) {
         }
         
         // Obter token
-        $headers = getallheaders();
-        $token = str_replace('Bearer ', '', $headers['Authorization'] ?? '');
+        $token = getBearerToken();
         
         if (empty($token)) {
             jsonResponse(false, 'Token não fornecido', null, 401);
@@ -320,8 +318,7 @@ switch ($action) {
         }
         
         // Obter token
-        $headers = getallheaders();
-        $token = str_replace('Bearer ', '', $headers['Authorization'] ?? '');
+        $token = getBearerToken();
         
         if (empty($token)) {
             jsonResponse(false, 'Token não fornecido', null, 401);
@@ -363,8 +360,7 @@ switch ($action) {
         }
         
         // Verificar autenticação e permissão
-        $headers = getallheaders();
-        $token = str_replace('Bearer ', '', $headers['Authorization'] ?? '');
+        $token = getBearerToken();
         $payload = validateJWT($token);
         
         if (!$payload || $payload['role'] !== 'admin') {
@@ -455,8 +451,7 @@ switch ($action) {
         }
         
         // Verificar autenticação
-        $headers = getallheaders();
-        $token = str_replace('Bearer ', '', $headers['Authorization'] ?? '');
+        $token = getBearerToken();
         $payload = validateJWT($token);
         
         if (!$payload) {
@@ -525,8 +520,7 @@ switch ($action) {
         }
         
         // Verificar autenticação e permissão
-        $headers = getallheaders();
-        $token = str_replace('Bearer ', '', $headers['Authorization'] ?? '');
+        $token = getBearerToken();
         $payload = validateJWT($token);
         
         if (!$payload || $payload['role'] !== 'admin') {

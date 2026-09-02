@@ -49,10 +49,32 @@ php setup.php --email=admin@labcontrol.local --password=SUA_SENHA_FORTE_16+
 
 O script irá:
 - Gerar o arquivo `.env` (se ausente) e criar `JWT_SECRET` + `ENCRYPTION_KEY` fortes automaticamente.
-- Criar o primeiro usuário **admin** com a senha informada (mín. 12 caracteres). Ele NÃO roda se já existirem usuários.
+- Criar o primeiro usuário **admin** com a senha informada (mín. 12 caracteres). Ele NÃO roda se já existirem usuários (responde `409` e não altera nada).
 - Após o uso, remova `labcontrol-backend/setup.php`.
 
 > Nunca reuse senhas fracas (ex.: `admin123`). O setup recusa senhas com menos de 12 caracteres.
+> **O `setup.php` não é um comando de login** — ele só cria a primeira conta. Iniciar sessão faz-se sempre pelo browser.
+
+### Gerir contas e diagnosticar problemas de login (CLI)
+
+```bash
+# na raiz do projeto
+php labcontrol-backend/cli/users.php list
+php labcontrol-backend/cli/users.php create --email=operador@lab.local --password=SenhaForte12+ --role=operator
+php labcontrol-backend/cli/users.php set-password --email=admin@labcontrol.local --password=NovaSenhaForte12+
+php labcontrol-backend/cli/users.php check-login --email=admin@labcontrol.local --password=...
+php labcontrol-backend/cli/users.php check-config
+php labcontrol-backend/cli/users.php reset-rate-limit
+```
+
+**Se o browser fica no ecrã de login (o botão "recarrega" mas não entra):**
+
+1. `check-login` diz se o par email/senha passa no backend (existe, está ativo, hash bcrypt válido, senha confere).
+2. Se passa mas o browser não entra, o token está a ser **rejeitado logo após o login**. Causas típicas, todas tratadas nesta versão mas que dependem do servidor:
+   - `JWT_SECRET` vazio/fraco no `.env` **e** ficheiro não gravável pelo Apache → o backend agora responde com um erro 500 explícito em vez de gerar um segredo diferente a cada request. Solução: `check-config` e dar permissão de escrita ao `.env`, ou definir `JWT_SECRET` manualmente.
+   - Header `Authorization` não chega ao PHP (PHP em CGI/FastCGI). O `.htaccess` do backend já reencaminha o header; confirme que o Apache tem `AllowOverride All` e `mod_rewrite` ativo.
+   - Rate limit ativo após várias tentativas: `reset-rate-limit`.
+3. A interface passou a mostrar a causa em vez de recarregar em silêncio: "Credenciais corretas, mas o servidor rejeitou a sessão…" significa exatamente o ponto 2.
 
 ### Passo 4: Instalação das Dependências do Worker (Node.js)
 

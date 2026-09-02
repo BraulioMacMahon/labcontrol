@@ -49,14 +49,20 @@ class LabControlAPI {
                             return this.request(endpoint, options, retryCount + 1);
                         }
                     }
-                    
-                    // Se o refresh falhar ou não houver token, limpa e avisa o app
+
+                    // Sessão inválida: limpar e SINALIZAR o erro. A versão anterior fazia
+                    // window.location.reload() em silêncio — se o backend rejeitasse o token
+                    // logo a seguir ao login (JWT_SECRET instável, header Authorization não
+                    // chega ao PHP, etc.), a página ficava num ciclo de recarregar sem
+                    // nenhuma mensagem ("não passa da tela de login").
                     this.clearAuth();
-                    // Só recarrega se NÃO for uma verificação inicial ou monitoramento
-                    if (!endpoint.includes('verify') && !endpoint.includes('check-all')) {
-                        window.location.reload();
-                    }
-                    return;
+                    let detail = '';
+                    try { detail = (await response.json()).message || ''; } catch (e) { /* sem corpo JSON */ }
+                    const err = new Error(detail || 'Sessão inválida ou expirada. Inicie sessão novamente.');
+                    err.isAuthError = true;
+                    err.status = 401;
+                    window.dispatchEvent(new CustomEvent('api:unauthorized', { detail: { endpoint, message: err.message } }));
+                    throw err;
                 }
                 
                 let errorMessage = `Erro ${response.status}`;

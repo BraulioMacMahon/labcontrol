@@ -39,6 +39,11 @@ class Database {
     public function getConnection() {
         return $this->connection;
     }
+
+    /** Última mensagem de erro PDO capturada (para logs/diagnóstico; nunca devolver ao cliente). */
+    public function getLastError() {
+        return $this->lastError;
+    }
     
     // ... (restante dos métodos mantidos igual ao teu ficheiro original)
     public function select($query, $params = []) {

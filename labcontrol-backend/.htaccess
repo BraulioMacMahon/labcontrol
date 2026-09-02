@@ -36,6 +36,15 @@
 # Rewrite Engine
 RewriteEngine On
 
+# Passar o header Authorization (Bearer JWT) ao PHP. Em PHP-CGI/FastCGI o Apache
+# descarta-o por omissão → o login devolve token mas todos os endpoints seguintes
+# respondem 401 e o frontend volta ao ecrã de login.
+RewriteCond %{HTTP:Authorization} .
+RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+<IfModule mod_setenvif.c>
+    SetEnvIf Authorization "(.+)" HTTP_AUTHORIZATION=$1
+</IfModule>
+
 # Bloquear acesso a arquivos sensíveis
 <FilesMatch "^\.">
     Order allow,deny
@@ -63,6 +72,7 @@ RewriteRule ^logs/ - [F,L]
 
 # Scripts de manutenção só via CLI (cron / Agendador de Tarefas) — nunca via web
 RewriteRule ^security-notifications\.php$ - [F,L]
+RewriteRule ^cli/ - [F,L]
 
 # Cópias de backup não devem ser servidas
 <FilesMatch "_backup\.php$">
