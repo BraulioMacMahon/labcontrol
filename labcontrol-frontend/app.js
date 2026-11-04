@@ -1,4 +1,4 @@
-import { api } from './api-service.js?v=2.0';
+import { api } from './api-service.js?v=2.1';
 
 // Escape HTML para evitar XSS armazenado (ex.: via hostname de host ou nome de processo)
 const lcEscape = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({
@@ -688,6 +688,7 @@ class LabControlApp {
                 const ip = actionBtn.dataset.ip;
                 if (a === 'edit-host') this.showHostModal(actionBtn.dataset.id);
                 if (a === 'add-host') this.showHostModal();
+                if (a === 'discover-host') this.handleDiscoverHost();
                 if (a === 'close-modal') this.hideHostModal();
                 if (a === 'restart-host') this.handleRestart(h);
                 if (a === 'shutdown-host') this.handleShutdown(h);
@@ -713,13 +714,26 @@ class LabControlApp {
         document.getElementById('host-modal-title').innerText = id ? 'Edit Host' : 'Add New Host';
         deleteButton.classList.toggle('hidden', !id);
 
+        // Inserção: pede-se apenas o hostname — IP e MAC são preenchidos pela
+        // consulta automática (ping -4 + arp -a). Na edição mantêm-se editáveis.
+        const ipField = document.getElementById('host-ip');
+        const macField = document.getElementById('host-mac');
+        const discoverBtn = document.getElementById('discover-host-btn');
+        const hint = document.getElementById('host-form-hint');
+        ipField.readOnly = !id;
+        macField.readOnly = !id;
+        ipField.classList.toggle('opacity-60', !id);
+        macField.classList.toggle('opacity-60', !id);
+        discoverBtn.classList.toggle('hidden', !!id);
+        hint?.classList.toggle('hidden', !!id);
+
         if (id) {
             const host = this.hosts.find(h => h.id == id);
             if (!host) return this.notify('Host não encontrado', 'error');
             document.getElementById('host-id').value = host.id;
             document.getElementById('host-name').value = host.name;
-            document.getElementById('host-ip').value = host.ip;
-            document.getElementById('host-mac').value = host.mac;
+            ipField.value = host.ip;
+            macField.value = host.mac;
         }
         modal.classList.remove('hidden');
         setTimeout(() => { modal.classList.remove('opacity-0'); modal.querySelector('#modal-content').classList.remove('translate-x-full'); }, 50);
@@ -732,8 +746,52 @@ class LabControlApp {
         setTimeout(() => modal.classList.add('hidden'), 500);
     }
 
+    async handleDiscoverHost() {
+        const hostname = document.getElementById('host-name').value.trim();
+        if (!hostname) {
+            this.notify('Indique o hostname para consultar', 'error');
+            return false;
+        }
+
+        const btn = document.getElementById('discover-host-btn');
+        const prevHtml = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="animate-spin pointer-events-none"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg> A consultar...`;
+
+        try {
+            const res = await api.discoverHost(hostname);
+            if (!res.success || !res.data?.ip) {
+                this.notify(res.message || 'Host não encontrado na rede', 'error');
+                return false;
+            }
+
+            document.getElementById('host-ip').value = res.data.ip;
+            document.getElementById('host-mac').value = res.data.mac_address || '';
+
+            if (res.data.mac_address) {
+                this.notify(`IP ${res.data.ip} · MAC ${res.data.mac_address} encontrados`, 'success');
+            } else {
+                this.notify(`IP ${res.data.ip} encontrado, mas o MAC não consta na tabela ARP`, 'error');
+            }
+            return true;
+        } catch (e) {
+            this.notify(e.message || 'Falha ao consultar o host', 'error');
+            return false;
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = prevHtml;
+        }
+    }
+
     async handleHostSubmit() {
         const id = document.getElementById('host-id').value;
+
+        // Inserção sem consulta prévia: descobre IP/MAC automaticamente pelo hostname
+        if (!id && !document.getElementById('host-ip').value.trim()) {
+            const discovered = await this.handleDiscoverHost();
+            if (!discovered) return;
+        }
+
         const hostData = {
             hostname: document.getElementById('host-name').value.trim(),
             ip: document.getElementById('host-ip').value.trim(),

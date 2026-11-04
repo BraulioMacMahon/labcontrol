@@ -25,7 +25,7 @@ Verifique periodicamente o tamanho do banco de dados (tabela `logs`).
 
 Existem três formas de adicionar máquinas ao sistema:
 
-1.  **Interface Gráfica (Frontend):** Clique no botão flutuante (+) no Dashboard e preencha IP, Hostname e MAC Address.
+1.  **Interface Gráfica (Frontend):** Clique no botão flutuante (+) no Dashboard, introduza apenas o hostname da máquina e clique em **Consultar** — o sistema executa `ping -4 "<hostname>"` para obter o IP e `arp -a "<ip>"` para obter o MAC, preenchendo os campos automaticamente. Depois confirme para registar o host.
 2.  **Importação SQL:** Insira múltiplos registros diretamente na tabela `hosts`.
     ```sql
     INSERT INTO hosts (ip, hostname, mac_address) VALUES ('192.168.1.10', 'PC-NOVO', '00:11:22:33:44:55');

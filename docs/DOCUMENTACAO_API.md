@@ -31,6 +31,7 @@ Este modo destina-se exclusivamente à rede interna autorizada do laboratório. 
 | Ação | Método | Descrição |
 | :--- | :--- | :--- |
 | `list` | GET | Lista todos os hosts cadastrados no inventário. |
+| `discover` | GET | Descobre o IP (`ping -4 "<hostname>"`) e o MAC (`arp -a "<ip>"`) de um hostname. |
 | `create` | POST | Adiciona um novo host (IP, MAC, Hostname). |
 | `update` | PUT | Atualiza dados de um host existente. |
 | `delete` | DELETE | Remove um host do sistema. |
@@ -68,6 +69,12 @@ Em caso de erro (HTTP 4xx ou 5xx), o campo `success` será `false`.
 ### Listar Processos de um PC
 ```bash
 curl -X GET "http://localhost/labcontrol/labcontrol-backend/api/control.php?action=processes&hostname=PC-LAB01"
+```
+
+### Descobrir IP e MAC de um Hostname
+```bash
+curl -X GET "http://localhost/labcontrol/labcontrol-backend/api/hosts.php?action=discover&hostname=PC-LAB01"
+# Resposta: { "success": true, "data": { "hostname": "PC-LAB01", "ip": "192.168.21.40", "mac_address": "00:1A:2B:3C:4D:5E", "warnings": [] } }
 ```
 
 ### Enviar Shutdown Remoto

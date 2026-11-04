@@ -98,6 +98,48 @@ switch ($action) {
         break;
     
     // =====================================================
+    // DESCOBRIR IP/MAC DE UM HOSTNAME (PING + ARP)
+    // =====================================================
+    case 'discover':
+        if ($method !== 'GET') {
+            jsonResponse(false, 'Método não permitido', null, 405);
+        }
+        
+        $hostname = trim($_GET['hostname'] ?? '');
+        
+        if (empty($hostname)) {
+            jsonResponse(false, 'Hostname é obrigatório', null, 400);
+        }
+        
+        // Validar hostname (mesmo critério do create — evita injeção de comandos)
+        if (!preg_match('/^[a-zA-Z0-9\-_.]{1,100}$/', $hostname)) {
+            jsonResponse(false, 'Hostname inválido', null, 400);
+        }
+        
+        // 1) ping -4 "<hostname>" → IP resolvido
+        $ip = resolveIpWithPing($hostname);
+        
+        if (!$ip) {
+            jsonResponse(false, 'Não foi possível resolver o IP de "' . $hostname . '". Verifique o nome e se o host está ligado à rede.', null, 404);
+        }
+        
+        // 2) arp -a "<ip>" → MAC (entrada criada na tabela ARP pelo ping)
+        $mac = lookupMacWithArp($ip);
+        
+        $warnings = [];
+        if ($mac === null) {
+            $warnings[] = 'Endereço MAC não encontrado na tabela ARP';
+        }
+        
+        jsonResponse(true, 'Host localizado na rede', [
+            'hostname' => $hostname,
+            'ip' => $ip,
+            'mac_address' => $mac,
+            'warnings' => $warnings
+        ]);
+        break;
+    
+    // =====================================================
     // CRIAR HOST
     // =====================================================
     case 'create':

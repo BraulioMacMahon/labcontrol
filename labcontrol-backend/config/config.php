@@ -442,3 +442,84 @@ function pingHost($ip) {
     
     return $returnCode === 0;
 }
+
+/**
+ * Resolve o IP de um hostname executando `ping -4` no servidor.
+ *
+ * A primeira linha do ping devolve o IP resolvido pelo DNS entre parênteses
+ * rectos/curvos ("Pinging LAB17-PC35 [192.168.21.40] with 32 bytes of data:" /
+ * "PING LAB17-PC35 (192.168.21.40) 56(84) bytes of data."), pelo que o IP
+ * fica conhecido mesmo que o host não responda ao ping (basta haver registo DNS).
+ *
+ * @return string|null IPv4 resolvido ou null se não for possível resolver.
+ */
+function resolveIpWithPing($hostname) {
+    $timeout = defined('PING_TIMEOUT') ? PING_TIMEOUT : 2;
+
+    // Windows
+    if (strtoupper(substr(PHP_OS, 0, 3)) === 'WIN') {
+        $command = 'ping -4 -n 1 -w ' . ($timeout * 1000) . ' ' . escapeshellarg($hostname);
+    } else {
+        // Linux/Mac
+        $command = 'ping -4 -c 1 -W ' . $timeout . ' ' . escapeshellarg($hostname);
+    }
+
+    $output = [];
+    exec($command, $output, $returnCode);
+    $text = implode("\n", $output);
+
+    // "Pinging LAB17-PC35 [192.168.21.40] with 32 bytes of data:" (Windows)
+    // "PING LAB17-PC35 (192.168.21.40) 56(84) bytes of data." (Linux)
+    if (preg_match('/[\[(](\d{1,3}(?:\.\d{1,3}){3})[\])]/', $text, $m)) {
+        if (filter_var($m[1], FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+            return $m[1];
+        }
+    }
+
+    // "Reply from 192.168.21.40: bytes=32 ..." / "Resposta de 192.168.21.40: ..."
+    if (preg_match('/^\s*(?:Reply from|Resposta de)\s+(\d{1,3}(?:\.\d{1,3}){3})\s*:/mi', $text, $m)) {
+        if (filter_var($m[1], FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+            return $m[1];
+        }
+    }
+
+    // O próprio hostname já é um IPv4 válido
+    if (filter_var($hostname, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+        return $hostname;
+    }
+
+    return null;
+}
+
+/**
+ * Obtém o endereço MAC de um IP consultando a tabela ARP do servidor
+ * (`arp -a "<ip>"`), preenchida automaticamente pelo ping executado antes.
+ *
+ * Formatos lidos:
+ * - Windows: "  192.168.21.40      00-1a-2b-3c-4d-5e     dynamic"
+ * - Linux:   "host (192.168.21.40) at 00:1a:2b:3c:4d:5e [ether] on eth0"
+ *
+ * @return string|null MAC normalizado (AA:BB:CC:DD:EE:FF) ou null se não encontrado.
+ */
+function lookupMacWithArp($ip) {
+    if (!filter_var($ip, FILTER_VALIDATE_IP)) {
+        return null;
+    }
+
+    $output = [];
+    exec('arp -a ' . escapeshellarg($ip) . ' 2>&1', $output, $returnCode);
+
+    $ipPattern = preg_quote($ip, '/');
+
+    foreach ($output as $line) {
+        // Só linhas que referenciam exactamente este IP (evita 192.168.21.4 vs 192.168.21.40)
+        if (!preg_match('/(?:^|[\s(])' . $ipPattern . '(?![\d.])/', $line)) {
+            continue;
+        }
+        if (preg_match('/\b([0-9a-fA-F]{2}(?:[:-][0-9a-fA-F]{2}){5})\b/', $line, $m)) {
+            return strtoupper(str_replace('-', ':', $m[1]));
+        }
+    }
+
+    return null;
+}
