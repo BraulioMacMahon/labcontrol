@@ -11,9 +11,9 @@ echo json_encode([
     'name' => 'LabControl Backend API',
     'version' => '1.0.0',
     'status' => 'online',
+    'access_mode' => 'local-no-login',
     'timestamp' => date('Y-m-d H:i:s'),
     'endpoints' => [
-        'auth' => '/api/auth.php',
         'hosts' => '/api/hosts.php',
         'control' => '/api/control.php',
         'sync' => '/api/sync.php',

@@ -1,4 +1,4 @@
-import { api } from './api-service.js?v=1.1';
+import { api } from './api-service.js?v=2.0';
 
 // Escape HTML para evitar XSS armazenado (ex.: via hostname de host ou nome de processo)
 const lcEscape = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({
@@ -6,37 +6,6 @@ const lcEscape = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({
 }[c]));
 
 const Components = {
-    AuthUI: () => `
-        <div class="w-full max-w-md p-10 glass-panel rounded-[2rem] shadow-2xl animate-float relative overflow-hidden">
-            <div class="absolute top-0 right-0 w-32 h-32 bg-blue-500/10 blur-[80px]"></div>
-            <div class="flex flex-col items-center mb-10 relative z-10">
-                <div class="w-16 h-16 bg-gradient-to-br from-blue-500 to-indigo-700 rounded-2xl flex items-center justify-center mb-5 shadow-[0_0_30px_rgba(59,130,246,0.5)]">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-white"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-                </div>
-                <h2 class="text-3xl font-extrabold text-white tracking-tight">LabControl</h2>
-                <p class="text-gray-400 text-sm mt-2 font-medium">Infrastructure Management</p>
-            </div>
-            <form id="login-form" class="space-y-5 relative z-10">
-                <div class="space-y-1.5">
-                    <label class="text-[11px] font-bold text-gray-500 uppercase tracking-wider ml-1">Email</label>
-                    <input type="email" id="login-email" placeholder="admin@labcontrol.local" value="admin@labcontrol.local"
-                        class="w-full bg-white/5 border border-white/10 rounded-2xl px-5 py-4 text-sm focus:border-blue-500 focus:bg-white/10 outline-none transition-all placeholder:text-gray-600 text-white">
-                </div>
-                <div class="space-y-1.5">
-                    <label class="text-[11px] font-bold text-gray-500 uppercase tracking-wider ml-1">Password</label>
-                    <input type="password" id="login-password" placeholder="••••••••" 
-                        class="w-full bg-white/5 border border-white/10 rounded-2xl px-5 py-4 text-sm focus:border-blue-500 focus:bg-white/10 outline-none transition-all placeholder:text-gray-600 text-white">
-                </div>
-                <button type="submit" id="auth-submit" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 rounded-2xl mt-4 shadow-[0_10px_25px_rgba(37,99,235,0.3)] transition-all active:scale-[0.98] flex items-center justify-center gap-2">
-                    Initialize System <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
-                </button>
-            </form>
-            <div class="mt-6 text-center relative z-10">
-                <p class="text-[10px] font-mono text-gray-600">2026 - Todos direitos reservados | Braulio Mac-Mahon</p>
-            </div>
-        </div>
-    `,
-
     KPICard: (title, value, icon, colorClass, delay, animate = true) => `
         <div class="glass-card p-6 rounded-3xl flex items-center gap-5 ${animate ? 'fade-in-up' : ''}" style="${animate ? `animation-delay: ${delay}ms` : ''}">
             <div class="w-14 h-14 rounded-2xl flex items-center justify-center shadow-inner ${colorClass.replace('text-', 'bg-').replace('400', '500/10')}">
@@ -113,65 +82,10 @@ class LabControlApp {
         this.logs = [];
         this.processes = [];
         this.charts = {};
-        this.isAuthenticated = false;
         this.currentView = 'dashboard';
-        this.sessionTimer = null;
-        this.sessionInterval = null;
-        this.sessionRemaining = 900; // 15 minutos em segundos
-        this.lastActivityTime = Date.now();
         
         this.attachEventListeners();
-        this.setupActivityListeners();
         this.init();
-    }
-
-    setupActivityListeners() {
-        ['mousedown', 'keydown', 'touchstart', 'scroll'].forEach(event => {
-            window.addEventListener(event, () => this.resetSessionTimer());
-        });
-    }
-
-    startSessionTimer() {
-        if (!this.isAuthenticated) return;
-        if (this.sessionTimer) clearTimeout(this.sessionTimer);
-        if (this.sessionInterval) clearInterval(this.sessionInterval);
-        
-        this.sessionRemaining = 900;
-        this.updateSessionUI();
-        
-        this.sessionTimer = setTimeout(() => {
-            this.handleAutoLogout();
-        }, 900 * 1000);
-
-        this.sessionInterval = setInterval(() => {
-            if (this.sessionRemaining > 0) {
-                this.sessionRemaining--;
-                this.updateSessionUI();
-            } else {
-                clearInterval(this.sessionInterval);
-            }
-        }, 1000);
-    }
-
-    updateSessionUI() {
-        const el = document.getElementById('session-countdown');
-        if (!el) return;
-
-        const minutes = Math.floor(this.sessionRemaining / 60);
-        const seconds = this.sessionRemaining % 60;
-        const formattedTime = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
-        
-        if (el.innerText !== `SESSION: ${formattedTime}`) {
-            el.innerText = `SESSION: ${formattedTime}`;
-        }
-        
-        if (this.sessionRemaining < 120) {
-            el.classList.add('text-red-500', 'animate-pulse');
-            el.classList.remove('text-amber-500/80');
-        } else {
-            el.classList.remove('text-red-500', 'animate-pulse');
-            el.classList.add('text-amber-500/80');
-        }
     }
 
     // Função para atualizar o DOM sem "piscar"
@@ -188,25 +102,8 @@ class LabControlApp {
         }
     }
 
-    handleAutoLogout() {
-        this.notify('🔴 Sessão expirada por inatividade', 'warning', 5000);
-        setTimeout(() => {
-            api.logout();
-            location.reload();
-        }, 2000);
-    }
-
-    resetSessionTimer() {
-        if (!this.isAuthenticated) return;
-        const now = Date.now();
-        if (now - this.lastActivityTime > 10000) {
-            this.lastActivityTime = now;
-            this.startSessionTimer();
-        }
-    }
-
     async init() {
-        await this.checkSession();
+        await this.enterApp();
         this.startSyncTimer();
         this.startNetworkMonitor();
         
@@ -217,12 +114,8 @@ class LabControlApp {
     }
 
     startNetworkMonitor() {
-        // Só executa a primeira checagem se já estiver autenticado
-        if (this.isAuthenticated) this.checkAllHosts();
-        
-        setInterval(() => {
-            if (this.isAuthenticated) this.checkAllHosts();
-        }, 10000);
+        this.checkAllHosts();
+        setInterval(() => this.checkAllHosts(), 10000);
     }
 
     async checkAllHosts() {
@@ -234,6 +127,7 @@ class LabControlApp {
                 
                 if (this.currentView === 'dashboard') {
                     this.renderDashboard(false); // Background update: no animation
+                    this.updateMainChart();
                 } else if (this.currentView === 'host-detail' && this.currentHostId) {
                     this.updateHostDetailDynamic();
                 }
@@ -243,44 +137,11 @@ class LabControlApp {
         }
     }
 
-    async checkSession() {
-        const token = localStorage.getItem('labcontrol_token');
-        if (token) {
-            try {
-                await api.verifyToken();
-                this.isAuthenticated = true;
-                await this.enterApp();
-            } catch (error) {
-                this.showAuth();
-            }
-        } else {
-            this.showAuth();
-        }
-    }
-
-    showAuth() {
-        this.isAuthenticated = false;
-        const overlay = document.getElementById('auth-overlay');
-        overlay.innerHTML = Components.AuthUI();
-        overlay.classList.remove('opacity-0', 'pointer-events-none');
-        document.getElementById('app').classList.add('opacity-0');
-        
-        document.getElementById('login-form').addEventListener('submit', (e) => {
-            e.preventDefault();
-            this.handleLogin();
-        });
-    }
-
     async enterApp() {
-        const overlay = document.getElementById('auth-overlay');
-        const app = document.getElementById('app');
-        this.isAuthenticated = true;
-        overlay.classList.add('opacity-0', 'pointer-events-none');
-        app.classList.remove('opacity-0');
+        document.getElementById('app').classList.remove('opacity-0');
         await this.loadDashboardData();
         this.renderSidebar();
-        this.startSessionTimer();
-        this.navigate('dashboard');
+        await this.navigate('dashboard');
     }
 
     async loadDashboardData() {
@@ -619,19 +480,6 @@ class LabControlApp {
 
     escapeHtml(t) { const d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
 
-    async handleLogin() {
-        const email = document.getElementById('login-email').value;
-        const password = document.getElementById('login-password').value;
-        const btn = document.getElementById('auth-submit');
-        if (!email || !password) return this.notify('Preencha os campos', 'error');
-        btn.disabled = true; btn.innerText = 'Autenticando...';
-        try {
-            const res = await api.login(email, password);
-            if (res?.success) { this.notify('Bem-vindo!', 'success'); await this.enterApp(); }
-            else { this.notify(res?.message || 'Falha no login', 'error'); btn.disabled = false; btn.innerText = 'Initialize System'; }
-        } catch (e) { this.notify('Erro inesperado', 'error'); btn.disabled = false; }
-    }
-
     async handleShutdown(hostname) {
         if (!confirm(`Desligar ${hostname}?`)) return;
         try {
@@ -848,7 +696,7 @@ class LabControlApp {
                 return;
             }
             if (target.id === 'modal-backdrop') this.hideHostModal();
-            if (target.closest('#logout-btn')) { api.logout(); location.reload(); }
+            if (target.closest('#delete-host-btn')) this.handleDeleteHost();
             if (target.closest('#shutdown-all-btn')) this.handleShutdownAll();
             if (target.closest('#wol-all-btn')) this.handleWakeOnLanAll();
         });
@@ -859,15 +707,19 @@ class LabControlApp {
     showHostModal(id = null) {
         const modal = document.getElementById('host-modal');
         const form = document.getElementById('host-form');
-        form.reset(); document.getElementById('host-id').value = '';
+        const deleteButton = document.getElementById('delete-host-btn');
+        form.reset();
+        document.getElementById('host-id').value = '';
+        document.getElementById('host-modal-title').innerText = id ? 'Edit Host' : 'Add New Host';
+        deleteButton.classList.toggle('hidden', !id);
+
         if (id) {
             const host = this.hosts.find(h => h.id == id);
-            if (host) {
-                document.getElementById('host-id').value = host.id;
-                document.getElementById('host-name').value = host.name;
-                document.getElementById('host-ip').value = host.ip;
-                document.getElementById('host-mac').value = host.mac;
-            }
+            if (!host) return this.notify('Host não encontrado', 'error');
+            document.getElementById('host-id').value = host.id;
+            document.getElementById('host-name').value = host.name;
+            document.getElementById('host-ip').value = host.ip;
+            document.getElementById('host-mac').value = host.mac;
         }
         modal.classList.remove('hidden');
         setTimeout(() => { modal.classList.remove('opacity-0'); modal.querySelector('#modal-content').classList.remove('translate-x-full'); }, 50);
@@ -882,12 +734,47 @@ class LabControlApp {
 
     async handleHostSubmit() {
         const id = document.getElementById('host-id').value;
-        const hostData = { hostname: document.getElementById('host-name').value, ip: document.getElementById('host-ip').value, mac_address: document.getElementById('host-mac').value };
+        const hostData = {
+            hostname: document.getElementById('host-name').value.trim(),
+            ip: document.getElementById('host-ip').value.trim(),
+            mac_address: document.getElementById('host-mac').value.trim() || null
+        };
         try {
             const res = id ? await api.updateHost(id, hostData) : await api.createHost(hostData);
-            if (res.success) { this.notify('Sucesso'); this.hideHostModal(); await this.loadDashboardData(); this.renderSidebar(); }
-            else this.notify(res.message, 'error');
-        } catch (e) { this.notify('Falha', 'error'); }
+            if (!res.success) return this.notify(res.message, 'error');
+
+            this.notify(id ? 'Host atualizado' : 'Host registado', 'success');
+            this.hideHostModal();
+            await this.loadDashboardData();
+            this.renderSidebar();
+            if (id && this.currentView === 'host-detail' && this.currentHostId === id) {
+                await this.loadHostDetail(id);
+            } else if (this.currentView === 'dashboard') {
+                this.renderDashboard(false);
+            }
+        } catch (e) {
+            this.notify(e.message || 'Falha ao guardar o host', 'error');
+        }
+    }
+
+    async handleDeleteHost() {
+        const id = document.getElementById('host-id').value;
+        const host = this.hosts.find(h => h.id === id);
+        if (!id || !host || !confirm(`Remover ${host.name} do LabControl?`)) return;
+
+        try {
+            const res = await api.deleteHost(id);
+            if (!res.success) return this.notify(res.message, 'error');
+
+            this.notify('Host removido', 'success');
+            this.hideHostModal();
+            if (this.currentHostId === id) this.currentHostId = null;
+            await this.loadDashboardData();
+            this.renderSidebar();
+            await this.navigate('dashboard');
+        } catch (e) {
+            this.notify(e.message || 'Falha ao remover o host', 'error');
+        }
     }
 }
 

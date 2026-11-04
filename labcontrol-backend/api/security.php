@@ -43,23 +43,6 @@ try {
                 exit;
             }
             
-            // VERIFICAR SE UTILIZADOR É ADMIN
-            $headers = getallheaders();
-            $token = str_replace('Bearer ', '', $headers['Authorization'] ?? '');
-            
-            if (!$token) {
-                http_response_code(401);
-                echo json_encode(['success' => false, 'message' => 'Token ausente'], JSON_PRETTY_PRINT);
-                exit;
-            }
-            
-            $payload = validateJWT($token);
-            if (!$payload || $payload['role'] !== 'admin') {
-                http_response_code(403);
-                echo json_encode(['success' => false, 'message' => 'Acesso negado'], JSON_PRETTY_PRINT);
-                exit;
-            }
-            
             // OBTER TENTATIVAS FALHADAS
             $limit = (int)($_GET['limit'] ?? 50);
             $offset = (int)($_GET['offset'] ?? 0);
@@ -110,23 +93,6 @@ try {
             if ($method !== 'GET') {
                 http_response_code(405);
                 echo json_encode(['success' => false, 'message' => 'Método não permitido'], JSON_PRETTY_PRINT);
-                exit;
-            }
-            
-            // VERIFICAR SE UTILIZADOR É ADMIN
-            $headers = getallheaders();
-            $token = str_replace('Bearer ', '', $headers['Authorization'] ?? '');
-            
-            if (!$token) {
-                http_response_code(401);
-                echo json_encode(['success' => false, 'message' => 'Token ausente'], JSON_PRETTY_PRINT);
-                exit;
-            }
-            
-            $payload = validateJWT($token);
-            if (!$payload || $payload['role'] !== 'admin') {
-                http_response_code(403);
-                echo json_encode(['success' => false, 'message' => 'Acesso negado'], JSON_PRETTY_PRINT);
                 exit;
             }
             

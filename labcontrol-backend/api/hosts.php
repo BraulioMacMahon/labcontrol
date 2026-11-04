@@ -25,14 +25,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 $action = $_GET['action'] ?? '';
 $method = $_SERVER['REQUEST_METHOD'];
 
-// Verificar autenticação
-$headers = getallheaders();
-$token = str_replace('Bearer ', '', $headers['Authorization'] ?? '');
-$payload = validateJWT($token);
-
-if (!$payload) {
-    jsonResponse(false, 'Token inválido ou expirado', null, 401);
-}
+// Acesso directo na rede local; identidade usada somente para auditoria.
+$actor = getLocalAccessContext();
 
 // Obter ação
 $action = $_GET['action'] ?? '';
@@ -111,10 +105,6 @@ switch ($action) {
             jsonResponse(false, 'Método não permitido', null, 405);
         }
         
-        // Apenas admin pode criar hosts
-        if ($payload['role'] !== 'admin') {
-            jsonResponse(false, 'Acesso negado', null, 403);
-        }
         
         $input = json_decode(file_get_contents('php://input'), true);
         
@@ -184,8 +174,8 @@ switch ($action) {
         
         // Registrar log
         $db->logAction(
-            $payload['user_id'],
-            $payload['email'],
+            $actor['user_id'],
+            $actor['email'],
             $hostId,
             $ip,
             'Host criado',
@@ -209,10 +199,6 @@ switch ($action) {
             jsonResponse(false, 'Método não permitido', null, 405);
         }
         
-        // Apenas admin pode atualizar hosts
-        if ($payload['role'] !== 'admin') {
-            jsonResponse(false, 'Acesso negado', null, 403);
-        }
         
         $input = json_decode(file_get_contents('php://input'), true);
         $id = intval($_GET['id'] ?? ($input['id'] ?? 0));
@@ -227,11 +213,9 @@ switch ($action) {
             jsonResponse(false, 'Host não encontrado', null, 404);
         }
         
-        $input = json_decode(file_get_contents('php://input'), true);
-        
         // Dados a atualizar
         $updateData = [];
-        $allowedFields = ['hostname', 'mac_address', 'is_active'];
+        $allowedFields = ['hostname', 'ip', 'mac_address', 'is_active'];
         
         foreach ($allowedFields as $field) {
             if (isset($input[$field])) {
@@ -242,6 +226,20 @@ switch ($action) {
         // Validar hostname se fornecido
         if (isset($updateData['hostname']) && !preg_match('/^[a-zA-Z0-9\-_.]{1,100}$/', $updateData['hostname'])) {
             jsonResponse(false, 'Hostname inválido', null, 400);
+        }
+
+        if (isset($updateData['ip'])) {
+            if (!filter_var($updateData['ip'], FILTER_VALIDATE_IP)) {
+                jsonResponse(false, 'IP inválido', null, 400);
+            }
+
+            $duplicate = $db->selectOne(
+                "SELECT id FROM hosts WHERE ip = :ip AND id <> :id",
+                [':ip' => $updateData['ip'], ':id' => $id]
+            );
+            if ($duplicate) {
+                jsonResponse(false, 'Já existe um host com este IP', null, 409);
+            }
         }
         
         if (empty($updateData)) {
@@ -264,10 +262,10 @@ switch ($action) {
         
         // Registrar log
         $db->logAction(
-            $payload['user_id'],
-            $payload['email'],
+            $actor['user_id'],
+            $actor['email'],
             $id,
-            $host['ip'],
+            $updateData['ip'] ?? $host['ip'],
             'Host atualizado',
             'host',
             json_encode($updateData),
@@ -288,10 +286,6 @@ switch ($action) {
             jsonResponse(false, 'Método não permitido', null, 405);
         }
         
-        // Apenas admin pode excluir hosts
-        if ($payload['role'] !== 'admin') {
-            jsonResponse(false, 'Acesso negado', null, 403);
-        }
         
         $id = intval($_GET['id'] ?? 0);
         
@@ -323,8 +317,8 @@ switch ($action) {
         
         // Registrar log
         $db->logAction(
-            $payload['user_id'],
-            $payload['email'],
+            $actor['user_id'],
+            $actor['email'],
             $id,
             $host['ip'],
             'Host excluído',
@@ -366,8 +360,8 @@ switch ($action) {
         
         // Registrar log
         $db->logAction(
-            $payload['user_id'],
-            $payload['email'],
+            $actor['user_id'],
+            $actor['email'],
             null,
             null,
             'Verificação de status de todos os hosts',
@@ -415,10 +409,6 @@ switch ($action) {
             jsonResponse(false, 'Método não permitido', null, 405);
         }
         
-        // Apenas admin pode importar
-        if ($payload['role'] !== 'admin') {
-            jsonResponse(false, 'Acesso negado', null, 403);
-        }
         
         $input = json_decode(file_get_contents('php://input'), true);
         $hosts = $input['hosts'] ?? [];
@@ -494,8 +484,8 @@ switch ($action) {
             
             // Registrar log
             $db->logAction(
-                $payload['user_id'],
-                $payload['email'],
+                $actor['user_id'],
+                $actor['email'],
                 null,
                 null,
                 'Importação de hosts em massa',
@@ -525,10 +515,6 @@ switch ($action) {
             jsonResponse(false, 'Método não permitido', null, 405);
         }
         
-        // Apenas admin pode configurar credenciais
-        if ($payload['role'] !== 'admin') {
-            jsonResponse(false, 'Acesso negado', null, 403);
-        }
         
         $input = json_decode(file_get_contents('php://input'), true);
         $username = $input['username'] ?? '';
@@ -554,8 +540,8 @@ switch ($action) {
             // Nota: Em produção, você pode querer reiniciar o servidor ou usar cache
             
             $db->logAction(
-                $payload['user_id'],
-                $payload['email'],
+                $actor['user_id'],
+                $actor['email'],
                 null,
                 null,
                 'Credenciais padrão atualizadas',
@@ -581,10 +567,6 @@ switch ($action) {
             jsonResponse(false, 'Método não permitido', null, 405);
         }
         
-        // Apenas admin pode ver credenciais
-        if ($payload['role'] !== 'admin') {
-            jsonResponse(false, 'Acesso negado', null, 403);
-        }
         
         $credentials = $db->getAllCredentials();
         
@@ -615,10 +597,6 @@ switch ($action) {
             jsonResponse(false, 'Método não permitido', null, 405);
         }
         
-        // Apenas admin pode configurar credenciais
-        if ($payload['role'] !== 'admin') {
-            jsonResponse(false, 'Acesso negado', null, 403);
-        }
         
         $hostId = intval($_GET['id'] ?? 0);
         
@@ -646,8 +624,8 @@ switch ($action) {
             $updated = $db->updateHostCredentials($hostId, null, null, true);
             
             $db->logAction(
-                $payload['user_id'],
-                $payload['email'],
+                $actor['user_id'],
+                $actor['email'],
                 $hostId,
                 $host['ip'],
                 'Host configurado para usar credenciais padrão',
@@ -668,8 +646,8 @@ switch ($action) {
             $updated = $db->updateHostCredentials($hostId, $username, $encryptedPassword, false);
             
             $db->logAction(
-                $payload['user_id'],
-                $payload['email'],
+                $actor['user_id'],
+                $actor['email'],
                 $hostId,
                 $host['ip'],
                 'Credenciais específicas do host atualizadas',

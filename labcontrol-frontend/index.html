@@ -108,13 +108,10 @@
     </style>
 </head>
 <body class="antialiased overflow-hidden">
-    <!-- Auth Overlay -->
-    <div id="auth-overlay" class="fixed inset-0 z-[200] bg-[#050505] flex items-center justify-center transition-all duration-700"></div>
-
     <!-- Mobile Overlay -->
     <div id="sidebar-overlay" class="fixed inset-0 bg-black/80 backdrop-blur-xl z-[45] hidden transition-opacity duration-500"></div>
 
-    <div id="app" class="flex h-screen w-full opacity-0 transition-opacity duration-700">
+    <div id="app" class="flex h-screen w-full">
         <!-- Sidebar -->
         <aside id="sidebar" class="fixed lg:static inset-y-0 left-0 w-80 glass-panel flex flex-col transition-transform duration-500 -translate-x-full lg:translate-x-0 z-50 shadow-[40px_0_100px_rgba(0,0,0,0.5)] lg:shadow-none rounded-r-[2rem] lg:rounded-none">
             <div class="p-8 flex items-center justify-between">
@@ -158,10 +155,10 @@
             </div>
 
             <div class="p-6">
-                <button id="logout-btn" class="w-full flex items-center justify-center gap-3 p-4 rounded-2xl bg-red-500/5 text-red-400 hover:bg-red-500/10 transition-all text-sm font-bold border border-red-500/10">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" x2="12" y1="2" y2="12"/></svg>
-                    SAIR DO SISTEMA
-                </button>
+                <div class="w-full flex items-center justify-center gap-3 p-4 rounded-2xl bg-green-500/5 text-green-400 text-xs font-bold border border-green-500/10">
+                    <span class="w-2 h-2 rounded-full bg-green-400"></span>
+                    ACESSO LOCAL DIRETO
+                </div>
             </div>
         </aside>
         
@@ -182,8 +179,8 @@
                                     <span id="sync-time" class="text-[10px] text-gray-500 font-bold font-mono tracking-widest uppercase">SYNC: --:--</span>
                                 </div>
                                 <div class="flex items-center gap-2">
-                                    <span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
-                                    <span id="session-countdown" class="text-[10px] text-amber-500/80 font-bold font-mono tracking-widest uppercase">SESSION: 15:00</span>
+                                    <span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>
+                                    <span class="text-[10px] text-green-500/80 font-bold font-mono tracking-widest uppercase">MODO LABORATÓRIO</span>
                                 </div>
                             </div>
                         </div>
@@ -218,8 +215,8 @@
                             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" x2="12" y1="2" y2="12"/></svg>
                         </button>
                         <div class="hidden md:flex flex-col text-right">
-                            <span class="text-xs font-black text-white tracking-tight">ADMIN</span>
-                            <span class="text-[9px] font-bold text-blue-500 tracking-[0.2em]">ROOT</span>
+                            <span class="text-xs font-black text-white tracking-tight">OPERADOR</span>
+                            <span class="text-[9px] font-bold text-blue-500 tracking-[0.2em]">LOCAL</span>
                         </div>
                         <div class="w-12 h-12 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-600 p-[1px] shadow-lg">
                             <div class="w-full h-full rounded-2xl bg-[#0a0a0a] flex items-center justify-center">
@@ -333,6 +330,6 @@
     </div>
 
     <script src="vendor/chart.js"></script>
-    <script type="module" src="app.js"></script>
+    <script type="module" src="app.js?v=2.0"></script>
 </body>
 </html>

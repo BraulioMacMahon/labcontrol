@@ -8,7 +8,7 @@ Esta documentação descreve a arquitetura técnica da plataforma LabControl, de
 O sistema é composto por quatro camadas principais:
 
 1.  **Frontend (Web):** Interface de usuário para monitoramento em tempo real e emissão de comandos.
-2.  **Backend (Local API):** Servidor PHP responsável pela lógica de negócio, autenticação e interface com o sistema operacional (PowerShell).
+2.  **Backend (Local API):** Servidor PHP responsável pela lógica de negócio e interface com o sistema operacional (PowerShell). No modo laboratório, o acesso à API é direto e não utiliza autenticação.
 3.  **Serviço de Sincronização (Worker):** Serviço Node.js que atua como ponte entre a infraestrutura local e a nuvem.
 4.  **Cloud (Firebase):** Camada de persistência externa que permite o monitoramento remoto fora da rede local.
 
@@ -34,7 +34,7 @@ graph TD
 
 ### 3.1. Monitoramento de Processos (Exemplo)
 1.  O **Frontend** solicita a lista de processos de um Host via `GET /api/control.php?action=processes`.
-2.  O **Backend PHP** valida o token JWT e verifica se o Host está online via Ping.
+2.  O **Backend PHP** recebe o pedido local sem exigir token e verifica se o Host está online via Ping.
 3.  O PHP gera um script temporário e utiliza `exec()` para rodar o **PowerShell** (`Get-Processes.ps1`) com credenciais administrativas via WinRM.
 4.  O PowerShell retorna um objeto JSON; o PHP processa e entrega ao Frontend.
 5.  A ação é registrada no log do **MySQL**.

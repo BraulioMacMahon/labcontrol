@@ -191,6 +191,17 @@ function getClientIP() {
     return !empty($_SERVER['REMOTE_ADDR']) ? $_SERVER['REMOTE_ADDR'] : '0.0.0.0';
 }
 
+/**
+ * Identidade usada apenas nos registos de auditoria do modo laboratório.
+ * Não representa uma sessão nem exige credenciais para aceder à aplicação.
+ */
+function getLocalAccessContext() {
+    return [
+        'user_id' => 'local',
+        'email' => 'operador@labcontrol.local'
+    ];
+}
+
 function generateJWT($payload) {
     $header = json_encode(['typ' => 'JWT', 'alg' => 'HS256']);
     $payload['iat'] = time();

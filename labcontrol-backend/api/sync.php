@@ -41,14 +41,8 @@ try {
         exit;
     }
 
-    // Verificar autenticação
-    $headers = getallheaders();
-    $token = str_replace('Bearer ', '', $headers['Authorization'] ?? '');
-    $payload = validateJWT($token);
-
-    if (!$payload) {
-        jsonResponse(false, 'Token inválido ou expirado', null, 401);
-    }
+    // Acesso directo na rede local; identidade usada somente para auditoria.
+    $actor = getLocalAccessContext();
 
     // Obter ação
     $action = $_GET['action'] ?? '';
@@ -100,7 +94,7 @@ try {
                     $results['logs'] = $firebase->syncPendingLogs();
                 }
                 
-                $db->logAction($payload['user_id'], $payload['email'], null, null, 'Sincronização manual', 'sync', json_encode($results), 'success');
+                $db->logAction($actor['user_id'], $actor['email'], null, null, 'Sincronização manual', 'sync', json_encode($results), 'success');
                 jsonResponse(true, 'Sincronização concluída', $results);
             } catch (Exception $e) {
                 logError('Falha na sincronização manual', ['error' => $e->getMessage()]);
