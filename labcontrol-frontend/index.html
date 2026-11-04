@@ -299,18 +299,26 @@
                 <div class="space-y-6">
                     <div class="relative group">
                         <label class="text-[10px] font-black text-gray-500 uppercase tracking-widest ml-1 mb-2 block transition-colors group-focus-within:text-blue-500">Identification</label>
-                        <input type="text" id="host-name" required placeholder="Ex: LAB-SRV-01" 
-                            class="w-full bg-white/[0.03] border border-white/10 rounded-2xl px-6 py-4 text-sm focus:border-blue-500 focus:bg-white/5 outline-none transition-all text-white placeholder:text-gray-700">
+                        <div class="flex gap-3">
+                            <input type="text" id="host-name" required placeholder="Ex: LAB-SRV-01" 
+                                class="flex-1 min-w-0 bg-white/[0.03] border border-white/10 rounded-2xl px-6 py-4 text-sm focus:border-blue-500 focus:bg-white/5 outline-none transition-all text-white placeholder:text-gray-700">
+                            <button type="button" id="discover-host-btn" data-action="discover-host" title="Consultar IP e MAC na rede (ping + arp)"
+                                class="shrink-0 px-6 rounded-2xl bg-blue-500/10 border border-blue-500/20 hover:bg-blue-500/20 hover:border-blue-500/40 text-blue-400 text-xs font-black uppercase tracking-widest transition-all flex items-center gap-2">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="pointer-events-none"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                                Consultar
+                            </button>
+                        </div>
+                        <p id="host-form-hint" class="text-[10px] text-gray-600 leading-relaxed ml-1 mt-2">Introduza apenas o hostname e clique em <span class="text-blue-500 font-bold">Consultar</span> — o IP é obtido via <code class="font-mono">ping -4</code> e o MAC via <code class="font-mono">arp -a</code>.</p>
                     </div>
 
                     <div class="grid grid-cols-1 gap-6">
                         <div class="relative group">
-                            <label class="text-[10px] font-black text-gray-500 uppercase tracking-widest ml-1 mb-2 block">Network Address (IP)</label>
+                            <label class="text-[10px] font-black text-gray-500 uppercase tracking-widest ml-1 mb-2 block">Network Address (IP) <span class="text-gray-700 normal-case tracking-normal font-bold">— preenchido automaticamente</span></label>
                             <input type="text" id="host-ip" required placeholder="192.168.1.XX" 
                                 class="w-full bg-white/[0.03] border border-white/10 rounded-2xl px-6 py-4 text-sm font-mono focus:border-blue-500 focus:bg-white/5 outline-none transition-all text-white">
                         </div>
                         <div class="relative group">
-                            <label class="text-[10px] font-black text-gray-500 uppercase tracking-widest ml-1 mb-2 block">Physical Address (MAC)</label>
+                            <label class="text-[10px] font-black text-gray-500 uppercase tracking-widest ml-1 mb-2 block">Physical Address (MAC) <span class="text-gray-700 normal-case tracking-normal font-bold">— preenchido automaticamente</span></label>
                             <input type="text" id="host-mac" placeholder="00:00:00:00:00:00" 
                                 class="w-full bg-white/[0.03] border border-white/10 rounded-2xl px-6 py-4 text-sm font-mono focus:border-blue-500 focus:bg-white/5 outline-none transition-all text-white">
                         </div>
@@ -330,6 +338,6 @@
     </div>
 
     <script src="vendor/chart.js"></script>
-    <script type="module" src="app.js?v=2.0"></script>
+    <script type="module" src="app.js?v=2.1"></script>
 </body>
 </html>

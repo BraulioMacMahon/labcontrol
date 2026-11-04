@@ -85,6 +85,10 @@ class LabControlAPI {
         return this.request(`hosts.php?action=get&id=${id}`, { method: 'GET' });
     }
 
+    async discoverHost(hostname) {
+        return this.request(`hosts.php?action=discover&hostname=${encodeURIComponent(hostname)}`, { method: 'GET' });
+    }
+
     async createHost(hostData) {
         return this.request('hosts.php?action=create', {
             method: 'POST',
