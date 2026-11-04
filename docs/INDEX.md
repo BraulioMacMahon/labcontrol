@@ -14,6 +14,7 @@ Este diretório contém a documentação técnica e estratégica da plataforma L
 | :--- | :--- |
 | [**Arquitetura**](DOCUMENTACAO_ARQUITETURA.md) | Visão geral da plataforma, fluxos de dados e redundância. |
 | [**Instalação**](GUIA_INSTALACAO.md) | Guia passo a passo para configuração do ambiente (XAMPP, Node.js). |
+| [**Funcionamento no Laboratório**](../GUIA_FUNCIONAMENTO_LABORATORIO.md) | Guia atual sem login: instalação, hosts, WinRM, WOL, arranque e diagnóstico. |
 | [**Banco de Dados**](DOCUMENTACAO_BANCO_DE_DADOS.md) | Modelo ER, tabelas, campos e queries SQL. |
 | [**API & Endpoints**](DOCUMENTACAO_API.md) | Documentação das rotas RESTful, parâmetros e respostas. |
 | [**Operações Remotas**](DOCUMENTACAO_OPERACOES_REMOTAS.md) | Detalhes sobre scripts PowerShell e integração WinRM. |

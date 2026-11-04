@@ -1,33 +1,23 @@
 # Documentação da API - LabControl
 
 ## 1. Visão Geral
-A API do LabControl é uma interface RESTful baseada em PHP que fornece endpoints para gerenciamento de hosts, execução de comandos remotos, visualização de logs e autenticação. Todas as respostas são retornadas no formato **JSON**.
+A API do LabControl é uma interface RESTful baseada em PHP que fornece endpoints para gerenciamento de hosts, execução de comandos remotos e visualização de logs. Todas as respostas são retornadas no formato **JSON** (exceto exportações CSV).
 
 ### Base URL
 `http://seu-servidor/labcontrol/labcontrol-backend/api/`
 
 ---
 
-## 2. Autenticação
-A maioria dos endpoints exige autenticação via **JWT (JSON Web Token)** enviado no header `Authorization`.
+## 2. Acesso local sem autenticação
+Os endpoints operacionais **não exigem login, JWT nem header `Authorization`**. As ações são registadas na auditoria com a identidade local `operador@labcontrol.local`, apenas para rastreabilidade.
 
-**Exemplo de Header:**
-`Authorization: Bearer <seu_token_aqui>`
-
-Para obter um token, utilize o endpoint de `login`.
+Este modo destina-se exclusivamente à rede interna autorizada do laboratório. Não exponha a API à Internet. As credenciais Windows usadas pelo WinRM continuam obrigatórias para operações remotas e são independentes do acesso à API.
 
 ---
 
 ## 3. Endpoints Principais
 
-### 3.1. Autenticação (`auth.php`)
-| Ação | Método | Descrição |
-| :--- | :--- | :--- |
-| `login` | POST | Autentica o usuário e retorna o token JWT. |
-| `verify` | GET | Verifica se o token atual é válido. |
-| `users` | GET | Lista os usuários cadastrados (apenas Admin). |
-
-### 3.2. Controle Remoto (`control.php`)
+### 3.1. Controle Remoto (`control.php`)
 | Ação | Método | Parâmetros | Descrição |
 | :--- | :--- | :--- | :--- |
 | `status` | GET | `hostname` ou `ip` | Retorna o status detalhado do host (online/offline). |
@@ -37,7 +27,7 @@ Para obter um token, utilize o endpoint de `login`.
 | `wol` | POST | `mac_address` | Envia o "Magic Packet" para Wake-on-LAN. |
 | `killprocess`| POST | `pid`, `hostname` | Encerra um processo específico. |
 
-### 3.3. Gerenciamento de Hosts (`hosts.php`)
+### 3.2. Gerenciamento de Hosts (`hosts.php`)
 | Ação | Método | Descrição |
 | :--- | :--- | :--- |
 | `list` | GET | Lista todos os hosts cadastrados no inventário. |
@@ -46,7 +36,7 @@ Para obter um token, utilize o endpoint de `login`.
 | `delete` | DELETE | Remove um host do sistema. |
 | `stats` | GET | Retorna estatísticas de disponibilidade (quantos online/offline). |
 
-### 3.4. Auditoria e Logs (`logs.php`)
+### 3.3. Auditoria e Logs (`logs.php`)
 | Ação | Método | Descrição |
 | :--- | :--- | :--- |
 | `list` | GET | Retorna o histórico de ações realizadas no sistema. |
@@ -75,23 +65,14 @@ Em caso de erro (HTTP 4xx ou 5xx), o campo `success` será `false`.
 
 ## 5. Exemplos Práticos (cURL)
 
-### Realizar Login
-```bash
-curl -X POST http://localhost/labcontrol/labcontrol-backend/api/auth.php?action=login \
-     -H "Content-Type: application/json" \
-     -d '{"email": "admin@labcontrol.local", "password": "admin123"}'
-```
-
 ### Listar Processos de um PC
 ```bash
-curl -X GET "http://localhost/labcontrol/labcontrol-backend/api/control.php?action=processes&hostname=PC-LAB01" \
-     -H "Authorization: Bearer <seu_token>"
+curl -X GET "http://localhost/labcontrol/labcontrol-backend/api/control.php?action=processes&hostname=PC-LAB01"
 ```
 
 ### Enviar Shutdown Remoto
 ```bash
 curl -X POST http://localhost/labcontrol/labcontrol-backend/api/control.php?action=shutdown \
-     -H "Authorization: Bearer <seu_token>" \
      -H "Content-Type: application/json" \
      -d '{"hostname": "PC-LAB01"}'
 ```
@@ -99,8 +80,7 @@ curl -X POST http://localhost/labcontrol/labcontrol-backend/api/control.php?acti
 ---
 
 ## 6. Permissões
-*   **Admin:** Acesso total a todos os endpoints, incluindo gerenciamento de usuários.
-*   **Operator:** Pode monitorar e enviar comandos de controle, mas não pode criar/remover usuários ou deletar logs.
+No modo laboratório não há papéis `admin`/`operator`: todas as funcionalidades estão disponíveis localmente sem sessão. Restrinja o acesso pela rede/Firewall e teste primeiro as ações destrutivas numa única estação.
 
 ---
 *Documentação Gerada em: 06/03/2026*

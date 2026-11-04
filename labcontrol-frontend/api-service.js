@@ -3,21 +3,21 @@ const API_CONFIG = {
     // funcionando fora de localhost. Em hospedagem com subpasta diferente, defina
     // window.LABCONTROL_API_BASE_URL no index.html.
     baseURL: (window.LABCONTROL_API_BASE_URL || `${location.origin}/labcontrol/labcontrol-backend/api`),
-    timeout: 15000,
-    retries: 2
+    timeout: 15000
 };
 
 class LabControlAPI {
     constructor() {
-        this.token = localStorage.getItem('labcontrol_token');
+        // Remove dados de versões antigas: a aplicação já não utiliza sessões.
+        localStorage.removeItem('labcontrol_token');
+        localStorage.removeItem('user_data');
         this.isOnline = navigator.onLine;
-        this.refreshPromise = null;
         
         window.addEventListener('online', () => this.handleOnline());
         window.addEventListener('offline', () => this.handleOffline());
     }
 
-    async request(endpoint, options = {}, retryCount = 0) {
+    async request(endpoint, options = {}) {
         const url = `${API_CONFIG.baseURL}/${endpoint}`;
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), API_CONFIG.timeout);
@@ -26,10 +26,6 @@ class LabControlAPI {
             'Content-Type': 'application/json',
             'Accept': 'application/json'
         };
-
-        if (this.token) {
-            defaultHeaders['Authorization'] = `Bearer ${this.token}`;
-        }
 
         try {
             const response = await fetch(url, {
@@ -41,24 +37,6 @@ class LabControlAPI {
             clearTimeout(timeoutId);
 
             if (!response.ok) {
-                if (response.status === 401 && retryCount < API_CONFIG.retries && endpoint !== 'auth.php?action=login') {
-                    // Só tenta refresh se houver um token
-                    if (this.token) {
-                        const refreshRes = await this.refreshToken();
-                        if (refreshRes && refreshRes.success) {
-                            return this.request(endpoint, options, retryCount + 1);
-                        }
-                    }
-                    
-                    // Se o refresh falhar ou não houver token, limpa e avisa o app
-                    this.clearAuth();
-                    // Só recarrega se NÃO for uma verificação inicial ou monitoramento
-                    if (!endpoint.includes('verify') && !endpoint.includes('check-all')) {
-                        window.location.reload();
-                    }
-                    return;
-                }
-                
                 let errorMessage = `Erro ${response.status}`;
                 try {
                     const errorData = await response.json();
@@ -89,112 +67,6 @@ class LabControlAPI {
             }
             throw error;
         }
-    }
-
-    async login(email, password) {
-        try {
-            const data = await this.request('auth.php?action=login', {
-                method: 'POST',
-                body: JSON.stringify({ email, password })
-            });
-
-            if (!data) {
-                throw new Error('Resposta vazia do servidor');
-            }
-
-            if (data.success && data.data && data.data.token) {
-                this.token = data.data.token;
-                localStorage.setItem('labcontrol_token', this.token);
-                localStorage.setItem('user_data', JSON.stringify(data.data.user));
-                return { success: true, data: data.data };
-            } else {
-                // Retornar erro sem lançar exceção
-                return { 
-                    success: false, 
-                    message: data.message || 'Falha na autenticação',
-                    data: null
-                };
-            }
-        } catch (error) {
-            console.error('Login API error:', error);
-            return {
-                success: false,
-                message: error.message || 'Erro ao conectar com o servidor',
-                data: null,
-                isNetworkError: true
-            };
-        }
-    }
-
-    async logout() {
-        try {
-            await this.request('auth.php?action=logout', { method: 'POST' });
-        } finally {
-            this.clearAuth();
-        }
-    }
-
-    async verifyToken() {
-        return this.request('auth.php?action=verify', { method: 'GET' });
-    }
-
-    async refreshToken() {
-        if (!this.token) return { success: false };
-        
-        // Se já houver um refresh em andamento, espera por ele
-        if (this.refreshPromise) {
-            return this.refreshPromise;
-        }
-
-        this.refreshPromise = (async () => {
-            try {
-                console.log('🔄 Renovando token de sessão...');
-                const response = await fetch(`${API_CONFIG.baseURL}/auth.php?action=refresh`, {
-                    method: 'POST',
-                    headers: {
-                        'Authorization': `Bearer ${this.token}`,
-                        'Accept': 'application/json'
-                    }
-                });
-                
-                if (response.ok) {
-                    const data = await response.json();
-                    if (data.success && data.data.token) {
-                        this.token = data.data.token;
-                        localStorage.setItem('labcontrol_token', this.token);
-                        console.log('✅ Token renovado com sucesso');
-                        return data;
-                    }
-                }
-                
-                console.error('❌ Falha ao renovar token');
-                this.clearAuth();
-                return { success: false };
-            } catch (e) {
-                console.error('❌ Erro na rede durante o refresh:', e);
-                return { success: false };
-            } finally {
-                this.refreshPromise = null;
-            }
-        })();
-
-        return this.refreshPromise;
-    }
-
-    clearAuth() {
-        this.token = null;
-        localStorage.removeItem('labcontrol_token');
-        localStorage.removeItem('user_data');
-    }
-
-    getUser() {
-        const user = localStorage.getItem('user_data');
-        return user ? JSON.parse(user) : null;
-    }
-
-    isAdmin() {
-        const user = this.getUser();
-        return user?.role === 'admin';
     }
 
     async getHosts() {

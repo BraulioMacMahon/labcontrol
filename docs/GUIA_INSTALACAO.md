@@ -32,27 +32,13 @@
 2.  Edite o arquivo `.env` com suas credenciais (veja a seção 4 deste guia).
 3.  Repita o processo para a pasta `sync-service/.env`.
 
-### Passo 3b: Setup de Primeiro Acesso (criar administrador + segredos)
+### Passo 3b: Acesso direto, sem setup de administrador
 
-O banco **não** vem com usuários nem com segredos (por segurança). Execute o setup **uma única vez**, a partir do localhost:
+O LabControl funciona agora em **modo laboratório sem login**. Não execute `setup.php`, não crie utilizador administrador e não configure tokens para utilizar o painel ou as APIs.
 
-**Via navegador (localhost):**
-```
-http://localhost/labcontrol/labcontrol-backend/setup.php?email=admin@labcontrol.local&password=SUA_SENHA_FORTE_16+
-```
+A `ENCRYPTION_KEY` continua necessária para proteger credenciais Windows guardadas por host. O backend gera e tenta persistir uma chave única quando ela está ausente, mas recomenda-se criá-la explicitamente conforme o [Guia de Funcionamento no Laboratório](../GUIA_FUNCIONAMENTO_LABORATORIO.md).
 
-**Ou via CLI:**
-```bash
-cd labcontrol-backend
-php setup.php --email=admin@labcontrol.local --password=SUA_SENHA_FORTE_16+
-```
-
-O script irá:
-- Gerar o arquivo `.env` (se ausente) e criar `JWT_SECRET` + `ENCRYPTION_KEY` fortes automaticamente.
-- Criar o primeiro usuário **admin** com a senha informada (mín. 12 caracteres). Ele NÃO roda se já existirem usuários.
-- Após o uso, remova `labcontrol-backend/setup.php`.
-
-> Nunca reuse senhas fracas (ex.: `admin123`). O setup recusa senhas com menos de 12 caracteres.
+> Este modo deve ser limitado à rede interna autorizada: quem conseguir aceder ao servidor poderá utilizar as operações de gestão e controlo remoto.
 
 ### Passo 4: Instalação das Dependências do Worker (Node.js)
 
@@ -89,8 +75,8 @@ Campos críticos que devem ser preenchidos no arquivo `.env` na raiz:
 | Variável | Descrição |
 | :--- | :--- |
 | `DB_PASS` | Senha do MySQL (vazio por padrão no XAMPP). |
-| `JWT_SECRET` | Chave aleatória para tokens de segurança. |
-| `ENCRYPTION_KEY` | Chave de 32 caracteres para encriptar senhas dos hosts. |
+| `ENCRYPTION_KEY` | Chave única para encriptar senhas Windows dos hosts (recomendado: 64 caracteres hexadecimais). |
+| `CORS_ALLOWED_ORIGINS` | Endereços HTTP autorizados a aceder à API (localhost e IP do servidor). |
 | `REMOTE_USER` | Usuário administrador padrão para comandos remotos. |
 | `REMOTE_PASSWORD` | Senha do administrador padrão. |
 | `FIREBASE_PROJECT_ID` | ID do seu projeto no Google Firebase. |
@@ -118,16 +104,27 @@ npm start
 ### 3. Acesso à Plataforma
 Abra o navegador e acesse: `http://localhost/labcontrol/labcontrol-frontend/`
 
+O Dashboard abre diretamente, sem login, senha ou token. Para acesso por outras máquinas e o procedimento completo de validação, consulte [GUIA_FUNCIONAMENTO_LABORATORIO.md](../GUIA_FUNCIONAMENTO_LABORATORIO.md).
+
 ---
 
 ## 6. Preparação dos Hosts (Estações)
-Para que o LabControl consiga gerenciar as estações, execute o seguinte comando no PowerShell (como Administrador) em cada máquina:
+Em cada estação, execute no PowerShell como Administrador:
 
 ```powershell
 Enable-PSRemoting -Force
-Set-Service WinRM -StartMode Automatic
-Set-Item WSMan:\localhost\Client\TrustedHosts -Value "IP_DO_SERVIDOR" -Force
+Set-Service WinRM -StartupType Automatic
+Start-Service WinRM
 ```
+
+Em redes sem domínio, configure `TrustedHosts` **no servidor/controlador**, indicando as estações de destino (e não o IP do servidor):
+
+```powershell
+Set-Item WSMan:\localhost\Client\TrustedHosts -Value "PC-LAB01,PC-LAB02" -Force
+Restart-Service WinRM
+```
+
+Consulte o guia principal para testar as credenciais, configurar a Firewall e ativar Wake-on-LAN.
 
 ---
 *Documentação Gerada em: 06/03/2026*

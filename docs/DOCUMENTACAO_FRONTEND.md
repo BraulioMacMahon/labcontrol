@@ -7,7 +7,7 @@ O frontend do LabControl é uma **Single Page Application (SPA)** construída co
 
 *   `index.html`: Ponto de entrada único. Contém a estrutura base (layout), as "views" principais e o container para componentes dinâmicos.
 *   `app.js`: O "cérebro" da aplicação. Gerencia o estado (state), rotas internas, monitoramento de rede e renderização de componentes.
-*   `api-service.js`: Camada de comunicação com o backend PHP. Gerencia tokens JWT, retentativas e tratamento de erros globais.
+*   `api-service.js`: Camada de comunicação com o backend PHP, timeouts e tratamento de erros. Não utiliza tokens nem dados de sessão.
 *   `vendor/`: Contém bibliotecas e ativos locais para funcionamento offline:
     *   `output.css`: Arquivo compilado do Tailwind CSS.
     *   `chart.js`: Biblioteca para gráficos de performance.
@@ -51,7 +51,7 @@ A navegação é gerenciada pela função `navigate(view, id)`:
 
 | Tela | Funcionalidade Principal |
 | :--- | :--- |
-| **Login** | Autenticação JWT com persistência em LocalStorage. |
+| **Acesso local** | Entrada direta no Dashboard, sem login, senha, token ou expiração de sessão. |
 | **Dashboard** | Visão geral da saúde do laboratório (KPIs de máquinas online/offline). |
 | **Lista de Hosts** | Inventário completo com filtros de busca e status em tempo real. |
 | **Detalhes do Host** | Gráficos de CPU/RAM em tempo real, lista de processos e botões de ação (Desligar, Reiniciar). |
