@@ -83,6 +83,8 @@ class LabControlApp {
         this.processes = [];
         this.charts = {};
         this.currentView = 'dashboard';
+        this.processError = null;      // último erro da consulta de processos
+        this.processesLoading = false; // evita sessões WinRM sobrepostas no polling
         
         this.attachEventListeners();
         this.init();
@@ -323,11 +325,18 @@ class LabControlApp {
         if (viewTitle) viewTitle.innerText = `Node: ${host.name}`;
         
         let processes = [];
+        this.processError = null;
         if (host.status === 'online') {
             try {
                 const procRes = await api.getProcesses(host.name);
-                if (procRes.success) processes = procRes.data.processes.slice(0, 15);
-            } catch (e) {}
+                if (procRes.success) {
+                    processes = this.normalizeProcesses(procRes.data?.processes);
+                } else {
+                    this.processError = procRes.message || 'Falha ao obter processos';
+                }
+            } catch (e) {
+                this.processError = e.message || 'Falha ao obter processos';
+            }
         }
 
         const detailHTML = `
@@ -363,7 +372,7 @@ class LabControlApp {
                             <span class="text-[10px] text-gray-500 font-mono">TOTAL: ${processes.length}</span>
                         </div>
                         <div class="overflow-y-auto flex-1 custom-scrollbar" id="process-table-container">
-                            ${this.renderProcessTable(host, processes)}
+                            ${this.renderProcessTable(host, processes, this.processError)}
                         </div>
                     </div>
                     <div class="bg-[#050505] border border-white/10 rounded-[2rem] overflow-hidden flex flex-col h-[500px]">
@@ -391,12 +400,27 @@ class LabControlApp {
         this.renderSidebar();
     }
 
-    renderProcessTable(host, processes) {
+    // O backend pode devolver uma lista, um único objecto ou nada.
+    normalizeProcesses(data) {
+        if (!data) return [];
+        const list = Array.isArray(data) ? data : [data];
+        return list.filter(p => p && typeof p === 'object').slice(0, 15);
+    }
+
+    renderProcessTable(host, processes, error = null) {
         if (host.status !== 'online') {
             return '<div class="flex items-center justify-center h-full text-gray-500 text-sm">Host offline - Sem dados de processos</div>';
         }
-        if (processes.length === 0) {
-            return '<div class="flex items-center justify-center h-full text-gray-500 text-sm">Carregando processos...</div>';
+        const list = this.normalizeProcesses(processes);
+        if (error) {
+            return `<div class="flex flex-col items-center justify-center h-full gap-2 px-8 text-center">
+                        <span class="text-amber-400 text-sm font-bold">Processos indisponíveis</span>
+                        <span class="text-gray-500 text-xs">${lcEscape(error)}</span>
+                        <span class="text-gray-600 text-[10px]">Verifique WinRM, TrustedHosts e REMOTE_USER/REMOTE_PASSWORD no servidor.</span>
+                    </div>`;
+        }
+        if (list.length === 0) {
+            return '<div class="flex items-center justify-center h-full text-gray-500 text-sm">Nenhum processo devolvido pelo host</div>';
         }
 
         return `
@@ -410,14 +434,14 @@ class LabControlApp {
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-white/[0.03]">
-                    ${processes.map(p => {
+                    ${list.map(p => {
                         const pid = p.Id || p.pid;
                         const name = p.ProcessName || p.name;
                         return `
                             <tr class="hover:bg-white/[0.02] group transition-colors">
                                 <td class="px-8 py-4 text-xs text-gray-300 font-bold">${lcEscape(name)}</td>
                                 <td class="px-8 py-4 font-mono text-[10px] text-gray-500">${pid}</td>
-                                <td class="px-8 py-4 text-xs text-gray-400">${p.CPU ? p.CPU.toFixed(1)+'%' : '0%'}</td>
+                                <td class="px-8 py-4 text-xs text-gray-400">${Number(p.CPU || 0).toFixed(1) + '%'}</td>
                                 <td class="px-8 py-4 text-right">
                                     <button data-action="kill-process" data-hostname="${host.name}" data-pid="${pid}" data-process-name="${name}" 
                                         class="p-2 text-gray-600 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all opacity-0 group-hover:opacity-100" title="Finalizar Processo">
@@ -436,16 +460,32 @@ class LabControlApp {
         if (this.currentView !== 'host-detail' || !this.currentHostId) return;
         const host = this.hosts.find(h => h.id === this.currentHostId);
         if (!host || host.status !== 'online') return;
+        // O monitor corre a cada 10 s: não abrir outra sessão WinRM enquanto a
+        // anterior ainda está a responder.
+        if (this.processesLoading) return;
+        this.processesLoading = true;
 
+        let processes = [];
+        let error = null;
         try {
             const procRes = await api.getProcesses(host.name);
             if (procRes.success) {
-                const processes = procRes.data.processes.slice(0, 15);
-                this.safeUpdateHTML('process-table-container', this.renderProcessTable(host, processes));
+                processes = this.normalizeProcesses(procRes.data?.processes);
+            } else {
+                error = procRes.message || 'Falha ao obter processos';
             }
         } catch (e) {
-            console.error('Update dynamic detail error:', e);
+            error = e.message || 'Falha ao obter processos';
+        } finally {
+            this.processesLoading = false;
         }
+
+        // Só escrever na consola quando o erro muda, em vez de a cada 10 s.
+        if (error && error !== this.processError) {
+            console.warn('Processos indisponíveis em ' + host.name + ':', error);
+        }
+        this.processError = error;
+        this.safeUpdateHTML('process-table-container', this.renderProcessTable(host, processes, error));
     }
 
     async handleKillProcess(hostname, pid, processName) {
@@ -545,7 +585,9 @@ class LabControlApp {
         const c = document.getElementById('toast-container');
         const toast = document.createElement('div');
         toast.className = `glass-panel px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-4 animate-slide-in border-l-4 ${t==='error'?'border-red-500':'border-green-500'}`;
-        toast.innerHTML = `<p class="text-sm font-bold text-white">${m}</p>`;
+        // As mensagens podem incluir data.error devolvido pelo PowerShell;
+        // escapar antes de as inserir como HTML.
+        toast.innerHTML = `<p class="text-sm font-bold text-white">${lcEscape(m)}</p>`;
         c.appendChild(toast);
         setTimeout(() => toast.remove(), d);
     }

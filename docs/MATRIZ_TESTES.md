@@ -87,7 +87,7 @@ DELETE /api/hosts.php?action=delete&id=1
 |------|--------|--------|
 | Shutdown | Shutdown-Host.ps1 | ✅ Implementado |
 | Restart | Restart-Host.ps1 | ✅ Implementado |
-| Get Processes | Get-Processes.ps1 | ✅ Implementado |
+| Get Processes | Get-Processes.ps1 | ✅ Implementado + parser testado (`tests/backend/test-powershell-output.php`) |
 | Kill Process | Kill-Process.ps1 | ✅ Implementado |
 | Wake-on-LAN | Falta implementar | ❌ Não |
 | Get System Info | Get-SystemInfo.ps1 | ✅ Implementado |

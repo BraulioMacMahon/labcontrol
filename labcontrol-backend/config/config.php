@@ -340,7 +340,7 @@ function isSafeComputerName($name) {
  * requisições chegavam no mesmo segundo (uma apagava o script da outra) e
  * tornava o caminho adivinhável. Devolve o caminho ou null em caso de falha.
  */
-function createTempPsScript($prefix, $content) {
+function createTempPsScript($prefix, $content, $propagateExitCode = false) {
     $dir = rtrim(sys_get_temp_dir(), '/\\');
     $safePrefix = preg_replace('/[^a-z0-9_]/i', '', (string) $prefix);
 
@@ -355,9 +355,25 @@ function createTempPsScript($prefix, $content) {
         }
 
         @chmod($path, 0600);
+        // Forçar UTF-8 na saída do PowerShell anfitrião. Sem isto, um script
+        // interior (Get-Processes.ps1) pode escrever UTF-8 mas o PowerShell que
+        // o invoca reencoda para a codepage OEM da consola e o json_decode()
+        // do PHP falha em descrições de processos com acentos.
+        $encodingHeader =
+            'try {' . "\r\n" .
+            '    $utf8NoBom = New-Object System.Text.UTF8Encoding -ArgumentList $false' . "\r\n" .
+            '    $OutputEncoding = $utf8NoBom' . "\r\n" .
+            '    [Console]::OutputEncoding = $utf8NoBom' . "\r\n" .
+            '} catch { }' . "\r\n";
+        // Quando o script temporário apenas invoca outro powershell.exe, o
+        // processo filho sai com 0/1 mas o anfitrião sairia sempre com 0.
+        // Sem isto o PHP via returnCode=0 mesmo em falhas de WinRM.
+        if ($propagateExitCode) {
+            $content .= "\r\n" . 'exit $LASTEXITCODE';
+        }
         // BOM UTF-8: o Windows PowerShell 5.1 lê .ps1 sem BOM como ANSI, o que
         // corromperia senhas/hostnames com caracteres acentuados.
-        $ok = fwrite($fh, "\xEF\xBB\xBF" . $content) !== false;
+        $ok = fwrite($fh, "\xEF\xBB\xBF" . $encodingHeader . $content) !== false;
         fclose($fh);
 
         if ($ok) {

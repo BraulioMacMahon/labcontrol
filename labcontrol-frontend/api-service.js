@@ -41,6 +41,10 @@ class LabControlAPI {
                 try {
                     const errorData = await response.json();
                     errorMessage = errorData.message || errorMessage;
+                    // O backend devolve o diagnóstico do PowerShell em data.error;
+                    // sem isto o browser só mostraria "Falha ao obter processos".
+                    const detail = errorData.data?.error || errorData.data?.raw_output;
+                    if (detail) errorMessage += ` — ${String(detail).slice(0, 220)}`;
                 } catch (e) {
                     // Se não for JSON, tenta pegar o texto
                     const textError = await response.text().catch(() => "");
@@ -155,7 +159,7 @@ class LabControlAPI {
     }
 
     async getProcesses(hostname) {
-        return this.request(`control.php?action=processes&hostname=${hostname}`, { method: 'GET' });
+        return this.request(`control.php?action=processes&hostname=${encodeURIComponent(hostname)}`, { method: 'GET' });
     }
 
     async killProcess(hostname, pid, processName = '', force = false) {

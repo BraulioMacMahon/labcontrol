@@ -9,6 +9,7 @@
 require_once __DIR__ . '/../config/config.php';
 require_once __DIR__ . '/../includes/Database.php';
 require_once __DIR__ . '/../includes/FirebaseIntegration.php';
+require_once __DIR__ . '/../includes/PowerShell.php';
 
 // Headers CORS
 header('Access-Control-Allow-Origin: ' . getCorsOrigin());
@@ -362,73 +363,110 @@ try {
         if ($method !== 'GET') {
             jsonResponse(false, 'Método não permitido', null, 405);
         }
-        
+
         $ip = $_GET['ip'] ?? '';
         $hostname = $_GET['hostname'] ?? '';
-        
+
         if (empty($ip) && empty($hostname)) {
             jsonResponse(false, 'IP ou Hostname do host é obrigatório', null, 400);
         }
-        
+
         $host = !empty($hostname) ? $db->selectOne("SELECT * FROM hosts WHERE hostname = :h AND is_active = 1", [':h' => $hostname]) : $db->getHostByIP($ip);
-        
+
         if (!$host) {
             jsonResponse(false, 'Host não encontrado', null, 404);
         }
-        
+
         $ip = $host['ip'];
+        if (!isSafeComputerName($host['hostname'])) {
+            logError('Hostname inválido recusado em processes', ['host_id' => $host['id']]);
+            jsonResponse(false, 'Hostname do host contém caracteres inválidos. Corrija o registo do host.', null, 422);
+        }
+
         if (!pingHost($ip)) {
             jsonResponse(false, 'Host está offline', null, 400);
         }
-        
+
+        // Sem credenciais o WinRM tenta a conta do servidor web e falha sempre.
+        // Antes isso chegava ao browser como "500 Falha ao obter processos".
         $credentials = getHostCredentials($host);
-        
+        if (empty($credentials['username']) || empty($credentials['password'])) {
+            logError('Listagem de processos sem credenciais remotas', ['host' => $host['hostname'], 'ip' => $ip]);
+            jsonResponse(false, 'Credenciais remotas não configuradas para este host (defina REMOTE_USER/REMOTE_PASSWORD no .env ou credenciais por host).', [
+                'error_type' => 'missing_credentials'
+            ], 412);
+        }
+
         $scriptPath = $powershellPath . 'Get-Processes.ps1';
-        
+        if (!is_file($scriptPath)) {
+            logError('Script Get-Processes.ps1 não encontrado', ['path' => $scriptPath]);
+            jsonResponse(false, 'Script de listagem de processos não encontrado no servidor.', [
+                'error_type' => 'script_missing'
+            ], 500);
+        }
+
         // Usar aspas simples no PowerShell para evitar expansão de variáveis ($) na senha
         $psContent = 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ' . psQuote($scriptPath) . ' ' .
                      '-ComputerName ' . psQuote($host['hostname']) . ' ' .
                      '-Username ' . psQuote($credentials['username']) . ' ' .
                      '-Password ' . psQuote($credentials['password']);
-        
-        $tempScript = createTempPsScript('get_proc', $psContent);
+
+        $tempScript = createTempPsScript('get_proc', $psContent, true);
         if ($tempScript === null) {
-            logError("Falha ao escrever script temporário", ['sys_temp' => sys_get_temp_dir()]);
-            throw new Exception("Falha ao escrever script temporário");
+            logError('Falha ao escrever script temporário', ['sys_temp' => sys_get_temp_dir()]);
+            throw new Exception('Falha ao escrever script temporário');
         }
-        
+
         $fullCommand = 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ' . escapeshellarg($tempScript) . ' 2>&1';
-        
+
         $output = [];
         $returnCode = 0;
         exec($fullCommand, $output, $returnCode);
-        
-        // Apagar script temporário
+
+        // Apagar script temporário (contém a password em claro)
         @unlink($tempScript);
-        
-        $result = processPowerShellOutput($output);
-        
-        if (isset($result['error']) && strpos($result['error'], 'ACESSO_NEGADO') !== false) {
-            jsonResponse(false, 'Credenciais inválidas ou usuário sem permissões administrativas.', [
-                'error_type' => 'authentication_failed'
-            ], 403);
+
+        $result = processPowerShellOutput($output, [$credentials['password']]);
+
+        $isFailure = $returnCode !== 0
+            || (isset($result['success']) && !$result['success'])
+            || isset($result['error']);
+
+        if ($isFailure) {
+            $failure = psClassifyFailure($result, $returnCode, 'Não foi possível obter os processos do host.');
+            // Diagnóstico completo no log do servidor; nunca devolver a password.
+            logError('Falha ao obter processos', [
+                'host'       => $host['hostname'],
+                'ip'         => $ip,
+                'exit_code'  => $returnCode,
+                'error_type' => $failure['error_type'],
+                'error'      => $failure['error'],
+                'output'     => psRedactSecrets(implode("\n", array_slice($output, 0, 20)), [$credentials['password']])
+            ]);
+            jsonResponse(false, $failure['message'], [
+                'error_type' => $failure['error_type'],
+                'error'      => $failure['error']
+            ], $failure['code']);
         }
-        
-        if (isset($result['error']) && strpos($result['error'], 'WINRM_ERRO') !== false) {
-            jsonResponse(false, 'Não foi possível conectar ao host. Verifique se o WinRM está habilitado.', [
-                'error_type' => 'winrm_error'
-            ], 503);
+
+        // Formato actual do script: {"success":true,"processes":[...]}.
+        // Mantém compatibilidade com versões antigas que devolviam a lista crua.
+        if (array_key_exists('processes', $result)) {
+            $processes = $result['processes'];
+        } elseif (isset($result['success'])) {
+            $processes = [];
+        } else {
+            $processes = $result;
         }
-        
-        if ($returnCode !== 0 || (isset($result['success']) && !$result['success'])) {
-            jsonResponse(false, 'Falha ao obter processos', [
-                'error' => $result['error'] ?? 'Erro desconhecido'
-            ], 500);
+        if (!is_array($processes)) {
+            $processes = [];
         }
-        
-        // Processos podem vir direto ou em $result['processes']
-        $processes = $result['processes'] ?? $result;
-        
+        // Um único processo serializado como objecto → lista (o frontend usa .slice()).
+        if (!empty($processes) && array_keys($processes) !== range(0, count($processes) - 1)) {
+            $processes = [$processes];
+        }
+        $processes = array_values($processes);
+
         $db->logAction(
             $actor['user_id'],
             $actor['email'],
@@ -439,7 +477,7 @@ try {
             json_encode(['process_count' => count($processes)]),
             'success'
         );
-        
+
         jsonResponse(true, 'Processos obtidos', [
             'host' => $host['hostname'],
             'ip' => $ip,
@@ -474,6 +512,10 @@ try {
         }
         
         $ip = $host['ip'];
+        if (!isSafeComputerName($host['hostname'])) {
+            logError('Hostname inválido recusado em operação remota', ['host_id' => $host['id'], 'action' => $action]);
+            jsonResponse(false, 'Hostname do host contém caracteres inválidos. Corrija o registo do host.', null, 422);
+        }
         if (!pingHost($ip)) {
             jsonResponse(false, 'Host está offline', null, 400);
         }
@@ -499,7 +541,7 @@ try {
                      $targetParam . ' ' . $forceParam;
         
         // Script temporário com nome imprevisível (evita colisões e caminhos adivinháveis)
-        $tempScript = createTempPsScript('kill', $psContent);
+        $tempScript = createTempPsScript('kill', $psContent, true);
         if ($tempScript === null) {
             throw new Exception('Falha ao criar script temporário');
         }
@@ -513,12 +555,18 @@ try {
         // Apagar script temporário
         @unlink($tempScript);
         
-        $result = processPowerShellOutput($output);
+        $result = processPowerShellOutput($output, [$credentials['password']]);
         
         if (isset($result['error']) && strpos($result['error'], 'ACESSO_NEGADO') !== false) {
             jsonResponse(false, 'Credenciais inválidas ou usuário sem permissões administrativas.', [
                 'error_type' => 'authentication_failed'
             ], 403);
+        }
+        
+        if (isset($result['error']) && strpos($result['error'], 'WINRM_ERRO') !== false) {
+            jsonResponse(false, 'Não foi possível conectar ao host. Verifique se o WinRM está habilitado.', [
+                'error_type' => 'winrm_error'
+            ], 503);
         }
         
         $success = $returnCode === 0 && isset($result['success']) && $result['success'];
@@ -579,6 +627,10 @@ try {
         }
         
         $ip = $host['ip'];
+        if (!isSafeComputerName($host['hostname'])) {
+            logError('Hostname inválido recusado em operação remota', ['host_id' => $host['id'], 'action' => $action]);
+            jsonResponse(false, 'Hostname do host contém caracteres inválidos. Corrija o registo do host.', null, 422);
+        }
         if (!pingHost($ip)) {
             jsonResponse(false, 'Host está offline', null, 400);
         }
@@ -595,7 +647,7 @@ try {
                      '-Command ' . psQuote($command);
         
         // Script temporário com nome imprevisível (evita colisões e caminhos adivinháveis)
-        $tempScript = createTempPsScript('exec_cmd', $psContent);
+        $tempScript = createTempPsScript('exec_cmd', $psContent, true);
         if ($tempScript === null) {
             throw new Exception('Falha ao criar script temporário');
         }
@@ -609,12 +661,18 @@ try {
         // Apagar script temporário
         @unlink($tempScript);
         
-        $result = processPowerShellOutput($output);
+        $result = processPowerShellOutput($output, [$credentials['password']]);
         
         if (isset($result['error']) && strpos($result['error'], 'ACESSO_NEGADO') !== false) {
             jsonResponse(false, 'Credenciais inválidas ou usuário sem permissões administrativas.', [
                 'error_type' => 'authentication_failed'
             ], 403);
+        }
+        
+        if (isset($result['error']) && strpos($result['error'], 'WINRM_ERRO') !== false) {
+            jsonResponse(false, 'Não foi possível conectar ao host. Verifique se o WinRM está habilitado.', [
+                'error_type' => 'winrm_error'
+            ], 503);
         }
         
         $success = $returnCode === 0 && isset($result['success']) && $result['success'];
@@ -635,6 +693,7 @@ try {
             'ip' => $ip,
             'command' => $command,
             'output' => $result['output'] ?? null,
+            'error' => $result['error'] ?? null,
             'exit_code' => $result['exit_code'] ?? $returnCode
         ]);
         break;
@@ -777,23 +836,9 @@ try {
 // =====================================================
 
 /**
- * Processa a saída do PowerShell e retorna array
+ * processPowerShellOutput(), psRedactSecrets() e psClassifyFailure() vivem em
+ * includes/PowerShell.php (partilhados e testáveis sem servidor web).
  */
-function processPowerShellOutput($output) {
-    $jsonOutput = implode('', $output);
-    $result = json_decode($jsonOutput, true);
-    
-    if (json_last_error() === JSON_ERROR_NONE) {
-        return $result;
-    }
-    
-    // Se não for JSON válido, retorna como texto
-    return [
-        'success' => false,
-        'raw_output' => $jsonOutput,
-        'error' => 'Resposta não é JSON válido'
-    ];
-}
 
 /**
  * Envia pacote Wake-on-LAN
@@ -840,7 +885,7 @@ function getHostDetails($host) {
                  '-Password ' . psQuote($credentials['password']);
 
     // Script temporário com nome imprevisível (evita colisões e caminhos adivinháveis)
-    $tempScript = createTempPsScript('get_details', $psContent);
+    $tempScript = createTempPsScript('get_details', $psContent, true);
     if ($tempScript === null) {
         return null;
     }
@@ -858,7 +903,7 @@ function getHostDetails($host) {
         return null;
     }
 
-    $result = processPowerShellOutput($output);
+    $result = processPowerShellOutput($output, [$credentials['password']]);
 
     return isset($result['success']) && $result['success'] ? $result : null;
 }
