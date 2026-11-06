@@ -70,6 +70,24 @@ Em caso de erro (HTTP 4xx ou 5xx), o campo `success` será `false`.
 ```bash
 curl -X GET "http://localhost/labcontrol/labcontrol-backend/api/control.php?action=processes&hostname=PC-LAB01"
 ```
+Resposta de sucesso (a `data.processes` é sempre uma lista, mesmo com 0 ou 1 processo):
+```json
+{
+  "success": true,
+  "message": "Processos obtidos",
+  "data": {
+    "host": "PC-LAB01",
+    "ip": "192.168.21.40",
+    "process_count": 2,
+    "processes": [{ "Id": 4, "ProcessName": "explorer", "CPU": 1.5, "MemoryMB": 82.31 }]
+  }
+}
+```
+Erros desta acção deixaram de ser `500` genéricos: `412` sem credenciais configuradas,
+`403` credenciais inválidas, `503` WinRM indisponível, `502` falha/resposta inválida do
+PowerShell, `504` timeout. O corpo inclui `data.error_type` e `data.error` com o diagnóstico
+(a password nunca é exposta) e o detalhe completo fica em `logs/error_AAAA-MM-DD.log`.
+Consulte `DOCUMENTACAO_OPERACOES_REMOTAS.md` §7 para o passo a passo de resolução.
 
 ### Descobrir IP e MAC de um Hostname
 ```bash
