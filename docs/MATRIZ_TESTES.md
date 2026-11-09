@@ -105,6 +105,51 @@ DELETE /api/hosts.php?action=delete&id=1
 | Shutdown | ✅ Sim | user_id, host_id, timestamp |
 | Mudança de permissão | ❌ Não | Não registrado |
 
+### 2.4 Bancada de Testes (`http://localhost/labcontrol/tests`)
+
+Área separada (pasta `tests/`) para os utilitários de diagnóstico e manutenção. Substitui a
+antiga aba *Testes* da aplicação, que hoje é apenas um link que abre a bancada em uma nova
+aba. Documentação completa em [`../tests/README.md`](../tests/README.md).
+
+| Rota | Comportamento esperado |
+|------|------------------------|
+| `GET /labcontrol/tests` sem sessão | Shell com o portão de entrada; catálogo e sondagens **não** são embutidos no HTML |
+| `POST api.php?action=handshake` com token da app | Sessão `labcontrol_tests`; cookie com `Path=/labcontrol/tests; HttpOnly; SameSite=Lax` |
+| `handshake` com assinatura inválida / papel não permitido | 401 `Token inválido ou expirado.` / 403 de papel |
+| `index.php?run=1&view=…` sem sessão | 401 JSON `{"reason":"no_session"}` |
+| `?view=../../.env`, `?view=backend/../gate.php`, `?view=index.php` | 404 (o caminho é resolvido dentro de `root/`, `backend/` e `frontend/`) |
+| Script `mode:"cli"` | 403 explicando que quebraria a própria sessão da bancada + o comando `php …` a usar |
+| Script `write`/`destructive` sem bilhete | 403 `Confirmação necessária`, nada é executado |
+| Bilhete reutilizado | 403 (uso único; o consumo fica em `tests/.state/used/`) |
+| `destructive` com senha reconfirmada | JWT novo (`iat` ≤ `TESTS_REAUTH_MAX_AGE`) e e-mail igual ao da sessão; depois, bilhete de `TESTS_GRANT_SECONDS` |
+| Script com `requires:["database"]` e o MySQL fora do ar | 503 antes de entregar o controle ao script |
+| `api.php` sem header `X-LC-CSRF` | 403 |
+| `tests/DISABLED` criado ou `TESTS_ENABLED=false` | 503 em toda a área (painel e API) |
+| `TESTS_ALLOWED_IPS` sem o IP do pedido | 403 com o endereço no texto |
+| Saída HTML de um utilitário | `<base href>` injetado para os recursos do próprio script; `<script>` removido quando embutida no painel |
+
+Sondagens de ambiente exibidas no topo da página (também consumíveis por
+`GET api.php?action=checks`, com cache de 45 s): `php`, `extensions`, `env`, `jwt_secret`,
+`debug_mode`, `timezone`, `database`, `tables`, `logs_columns`, `accounts`, `logs_dir`,
+`cache_dir`, `session_storage`, `exec`, `powershell`, `ps_scripts`, `sync_service`,
+`cors`, `auth_api`, `catalog`, `guard`.
+
+Catálogo curado em `tests/catalog.json` (38 scripts, 8 grupos). Cada entrada declara
+`mode` (`read`/`write`/`destructive`/`sensitive`/`cli`), `summary`, `expect`,
+`side_effects`, `warn`, `requires`, `fixes` e, para os que só fazem sentido fora do
+navegador, `runner`/`cli`. Um `.php` novo na pasta aparece no painel mesmo sem ficha
+(`documented:false`), com o modo estimado por análise estática do código.
+
+**Como testar manualmente (sem MySQL nem Windows):**
+
+```bash
+cd labcontrol/tests && php -S 127.0.0.1:8099
+# 1. http://127.0.0.1:8099            → só o portão; sem catálogo no HTML
+# 2. ?view=root/test-path.php&run=1    → 401 JSON (sem sessão)
+# 3. api.php?action=checks             → 21 sondagens, banco de dados em falha legível
+# 4. crie tests/DISABLED               → 503 em tudo; apague para reabrir
+```
+
 ---
 
 ## 3. Testes de Performance
@@ -242,7 +287,15 @@ class DatabaseTest extends \PHPUnit\Framework\TestCase {
 }
 ```
 
-### 6.2 Jest - Frontend
+### 6.2 Teste de fumaça da própria bancada
+
+Antes de mexer em `tests/gate.php`, `tests/index.php` ou `tests/api.php`, percorrer a
+tabela da seção 2.4 com `php -S` numa máquina sem MySQL: as paths de falha (banco fora do
+ar, sem sessão, sem bilhete, bilhete repetido) são o que interessa ver aqui — um 500 em
+qualquer uma delas significa que o portão deixou de ser a única coisa entre o navegador e
+o script.
+
+### 6.3 Jest - Frontend
 
 ```javascript
 // app.test.js

@@ -1,0 +1,487 @@
+{
+  "version": 1,
+  "updated": "2026-11-09",
+  "notes": "Catálogo da página de testes (/labcontrol/tests). É a fonte de título, categoria e nível de risco de cada script. Um arquivo em tests/root, tests/backend ou tests/frontend que não esteja listado aqui continua a aparecer no painel, marcado como 'sem ficha' (a descrição é lida do bloco de comentários do próprio arquivo).",
+  "groups": [
+    {
+      "id": "site",
+      "label": "Estado do sistema",
+      "hint": "Verificações globais do servidor: PHP, arquivos, APIs e serviços.",
+      "icon": "pulse",
+      "tone": "blue"
+    },
+    {
+      "id": "auth",
+      "label": "Autenticação e sessão",
+      "hint": "Login, JWT, rate limiting e registro de tentativas falhadas.",
+      "icon": "key",
+      "tone": "violet"
+    },
+    {
+      "id": "db",
+      "label": "Banco de dados e schema",
+      "hint": "Ligação, tabelas, colunas em falta e migrações.",
+      "icon": "database",
+      "tone": "cyan"
+    },
+    {
+      "id": "users",
+      "label": "Usuários e credenciais",
+      "hint": "Manuseiam hashes e senhas. Alguns redefinem contas.",
+      "icon": "shield",
+      "tone": "amber"
+    },
+    {
+      "id": "net",
+      "label": "Rede e energia",
+      "hint": "Ping, descoberta de hosts e pacotes Wake-on-LAN.",
+      "icon": "network",
+      "tone": "green"
+    },
+    {
+      "id": "powershell",
+      "label": "PowerShell e WinRM",
+      "hint": "Caminhos de scripts, execução local e parser de saída.",
+      "icon": "terminal",
+      "tone": "rose"
+    },
+    {
+      "id": "frontend",
+      "label": "Frontend",
+      "hint": "Páginas de depuração que executam no navegador.",
+      "icon": "browser",
+      "tone": "blue"
+    },
+    {
+      "id": "maint",
+      "label": "Manutenção fora do navegador",
+      "hint": "Scripts que não podem executar via web (partilham a sessão PHP).",
+      "icon": "wrench",
+      "tone": "gray"
+    }
+  ],
+  "scripts": {
+    "backend/health-check.php": {
+      "title": "Health check clássico",
+      "group": "site",
+      "mode": "read",
+      "summary": "Página de saúde herdada: banco de dados, versão PHP, extensões, pastas e scripts PowerShell.",
+      "expect": "Seções com selo OK/ERRO. Se o banco de dados falhar, a mensagem PDO é impressa por baixo.",
+      "fixes": [
+        "backend/fix-database.php",
+        "backend/migrate-tables.php"
+      ]
+    },
+    "backend/test-connection.php": {
+      "title": "Ligação a todos os serviços",
+      "group": "site",
+      "mode": "read",
+      "summary": "Sonda em sequência: config.php, PDO, tabela users, tabela logs, PowerShell e arquivos .env.",
+      "expect": "Cartões por etapa. O primeiro cartão vermelho indica onde a cadeia de arranque parte.",
+      "fixes": [
+        "backend/fix-logs-table.php"
+      ]
+    },
+    "backend/test-firebase.php": {
+      "title": "Integração Firebase",
+      "group": "site",
+      "mode": "read",
+      "summary": "Mostra FIREBASE_ENABLED, o projeto configurado e tenta carregar as credenciais do service account.",
+      "expect": "Texto simples. Com FIREBASE_ENABLED=false apenas confirma que a integração está desligada.",
+      "fixes": []
+    },
+    "backend/test-auth.php": {
+      "title": "Carregamento das dependências da API",
+      "group": "auth",
+      "mode": "read",
+      "summary": "Carga fase a fase (config → security → Database → Firebase → RateLimiter → Validator) com um JSON por passo.",
+      "expect": "Passos numerados 1..12. Diz exatamente qual require/instância rebenta quando a API responde 500.",
+      "fixes": [
+        "backend/test-connection.php"
+      ]
+    },
+    "backend/debug-login.php": {
+      "title": "Debug do login contra o banco de dados",
+      "group": "auth",
+      "mode": "read",
+      "summary": "Conecta ao banco de dados, lista usuários e executa password_verify com as credenciais de teste.",
+      "expect": "Saída de texto plano. Útil quando o login falha sem mensagem no frontend.",
+      "fixes": [
+        "root/debug-list-users.php"
+      ]
+    },
+    "backend/reset-rate-limit.php": {
+      "title": "Limpar bloqueio de rate limiting",
+      "group": "auth",
+      "mode": "write",
+      "summary": "Apaga os arquivos de cache do RateLimiter em labcontrol-backend/cache para destravar logins bloqueados (HTTP 429).",
+      "expect": "JSON com a lista de arquivos removidos.",
+      "side_effects": "Remove também os contadores de outros endpoints limitados.",
+      "fixes": []
+    },
+    "root/check-failed-login-logs.php": {
+      "title": "Tentativas de login falhadas",
+      "group": "auth",
+      "mode": "read",
+      "summary": "Consulta a tabela logs e lista os registros de autenticação com estado 'failed'.",
+      "expect": "Tabela com data, email e IP. Vazia significa que ainda não houve tentativas falhadas registadas.",
+      "fixes": [
+        "root/test-failed-login-tracking.php"
+      ]
+    },
+    "root/test-auth-clean.php": {
+      "title": "POST de login simulado (com buffer)",
+      "group": "auth",
+      "mode": "write",
+      "summary": "Inclui api/auth.php forjando $_GET/$_SERVER para executar a ação login com o payload hardcoded admin123.",
+      "expect": "JSON da API. Regista um login real na tabela logs e consome um slot do rate limiting.",
+      "side_effects": "Cria registro de auditoria de login.",
+      "fixes": [
+        "backend/debug-login.php"
+      ]
+    },
+    "root/test-auth-direct.php": {
+      "title": "POST de login simulado (sem buffer)",
+      "group": "auth",
+      "mode": "write",
+      "summary": "Igual ao teste limpo mas deixa sair avisos e headers do auth.php — serve para ver o que a versão silenciosa esconde.",
+      "expect": "JSON, por vezes com warnings PHP à frente: esses warnings são o bug a procurar.",
+      "side_effects": "Cria registro de auditoria de login.",
+      "fixes": [
+        "root/test-auth-clean.php"
+      ]
+    },
+    "root/test-login.php": {
+      "title": "Login com php://input mockado",
+      "group": "auth",
+      "mode": "write",
+      "summary": "Forja o corpo JSON do pedido e global $php_input antes de incluir api/auth.php.",
+      "expect": "Resposta do auth.php. Confirma se o problema está no parsing do corpo ou na validação.",
+      "side_effects": "Cria registro de auditoria de login.",
+      "fixes": [
+        "root/test-login-request.php"
+      ]
+    },
+    "root/test-login-request.php": {
+      "title": "Pedido de login via cURL local",
+      "group": "auth",
+      "mode": "write",
+      "summary": "Dispara um POST real contra http://localhost/labcontrol/labcontrol-backend/api/auth.php?action=login e mostra código HTTP + corpo.",
+      "expect": "Código HTTP e JSON cru. Testa também o Apache e o CORS, não só a lógica PHP.",
+      "side_effects": "Consome rate limiting e fica registado na tabela logs.",
+      "fixes": [
+        "backend/reset-rate-limit.php"
+      ]
+    },
+    "root/test-invalid-credentials.php": {
+      "title": "Credenciais inválidas e HTTP 401",
+      "group": "auth",
+      "mode": "write",
+      "summary": "Envia várias combinações erradas por cURL para verificar se a API retorna 401 e se o bloqueio por tentativas ativa.",
+      "expect": "Um resultado por combinação. Deverá terminar com 429 quando o limite de RATE_LIMIT_LOGIN é atingido.",
+      "side_effects": "Pode bloquear o seu próprio IP de fazer login até à janela seguinte.",
+      "fixes": [
+        "backend/reset-rate-limit.php",
+        "root/check-failed-login-logs.php"
+      ]
+    },
+    "root/test-failed-login-tracking.php": {
+      "title": "Registro de tentativas falhadas",
+      "group": "auth",
+      "mode": "write",
+      "summary": "Corre 3 logins inválidos e confirma que cada um ficou na tabela logs com contexto JSON (IP + email tentado).",
+      "expect": "Contagem de registros antes e depois; deve subir exatamente 3.",
+      "side_effects": "Altera o rate limiting de login para este IP.",
+      "fixes": [
+        "root/check-failed-login-logs.php"
+      ]
+    },
+    "backend/fix-database.php": {
+      "title": "Reparar colunas em falta",
+      "group": "db",
+      "mode": "destructive",
+      "summary": "Faz ALTER TABLE nas tabelas users/hosts/logs/sync_queue para criar colunas que o código espera mas o schema antigo não tem.",
+      "expect": "JSON por coluna adicionada. Correções são aditivas: não apaga dados, mas muda a estrutura.",
+      "side_effects": "ALTER TABLE bloqueia a tabela enquanto executa; fazer backup antes é recomendado.",
+      "requires": [
+        "database"
+      ],
+      "fixes": [
+        "root/debug-logs-table.php"
+      ]
+    },
+    "backend/migrate-tables.php": {
+      "title": "Migração completa de tabelas",
+      "group": "db",
+      "mode": "destructive",
+      "summary": "Versão longa do reparo de schema: cria tabelas em falta e adiciona colunas/índices um a um com relatório detalhado.",
+      "expect": "Relatório linha a linha do que existia, do que foi criado e do que falhou.",
+      "side_effects": "Mexer no schema em produção exige backup prévio.",
+      "requires": [
+        "database"
+      ],
+      "fixes": [
+        "backend/fix-database.php"
+      ]
+    },
+    "backend/full-setup.php": {
+      "title": "Setup completo do banco de dados",
+      "group": "db",
+      "mode": "destructive",
+      "summary": "Recria o schema a partir do zero (users, hosts, logs, sync_queue, system_config) e insere admin/operator padrão com senha fraca.",
+      "expect": "Lista de tabelas criadas e usuários inseridos.",
+      "side_effects": "Cria contas com senhas conhecidas. Só para instalação nova.",
+      "requires": [
+        "database"
+      ],
+      "warn": "Recria admin@labcontrol.local com 'admin123'. Depois de executar, define uma senha forte em Usuários.",
+      "fixes": [
+        "root/fix-passwords.php"
+      ]
+    },
+    "backend/setup.php": {
+      "title": "Setup antigo (descontinuado)",
+      "group": "db",
+      "mode": "destructive",
+      "summary": "Primeira versão do setup de instalação, substituída por labcontrol-backend/setup.php (que gera segredos fortes e só executa em first-run).",
+      "expect": "JSON de resultado; exige IP 127.0.0.1.",
+      "side_effects": "Insere admin@labcontrol.local com senha fixa.",
+      "deprecated": "usa antes: php labcontrol-backend/setup.php --email=... --password=...",
+      "requires": [
+        "database"
+      ],
+      "fixes": []
+    },
+    "backend/fix-logs-table.php": {
+      "title": "Adicionar coluna timestamp aos logs",
+      "group": "db",
+      "mode": "write",
+      "summary": "ALTER TABLE logs ADD COLUMN timestamp com valor por omissão CURRENT_TIMESTAMP.",
+      "expect": "Confirmação da coluna criada ou aviso de que já existia.",
+      "requires": [
+        "database"
+      ],
+      "fixes": [
+        "root/debug-logs-table.php"
+      ]
+    },
+    "root/fix-logs-table.php": {
+      "title": "Reconstruir tabela de logs",
+      "group": "db",
+      "mode": "destructive",
+      "summary": "Ajusta a estrutura da tabela logs às colunas que a API espera, criando a tabela quando não existe.",
+      "expect": "Passos com emojis (🔧) por coluna alterada.",
+      "side_effects": "Se a tabela tiver de ser recriada, o histórico de auditoria perde-se.",
+      "requires": [
+        "database"
+      ],
+      "fixes": [
+        "root/check-logs-count.php"
+      ]
+    },
+    "root/check-logs-count.php": {
+      "title": "Contagem de registros na tabela logs",
+      "group": "db",
+      "mode": "read",
+      "summary": "COUNT(*) rápido e presença da tabela no information_schema.",
+      "expect": "Número de registros; 0 com API a funcionar normalmente costuma significar LOG_ENABLED=false.",
+      "fixes": [
+        "root/debug-logs-table.php"
+      ]
+    },
+    "root/debug-logs-table.php": {
+      "title": "Estrutura real da tabela logs",
+      "group": "db",
+      "mode": "read",
+      "summary": "LISTA colunas e tipos de logs via information_schema — compara com o que database.sql promete.",
+      "expect": "Tabela nome/tipo/nullable por coluna.",
+      "fixes": [
+        "backend/fix-database.php"
+      ]
+    },
+    "root/debug-logs-full.php": {
+      "title": "Despejo completo de logs + DESCRIBE",
+      "group": "db",
+      "mode": "sensitive",
+      "summary": "DESCRIBE e SELECT * da tabela logs na totalidade.",
+      "expect": "Registros com email, IP e detalhes de ações — pode conter dados pessoais.",
+      "warn": "Não partilhar a saída em chat de suporte sem antes remover IPs e emails.",
+      "fixes": [
+        "root/check-logs-count.php"
+      ]
+    },
+    "backend/debug-password.php": {
+      "title": "Recria a conta admin para testar password_verify",
+      "group": "users",
+      "mode": "destructive",
+      "summary": "Apaga admin@labcontrol.local e a reinsere com a senha 'admin123' para isolar problemas de hash.",
+      "expect": "JSON com o hash antigo, o novo e o resultado de password_verify.",
+      "side_effects": "Perde a senha atual do admin e a data de último login.",
+      "requires": [
+        "database"
+      ],
+      "warn": "Deixa a conta admin com uma senha conhecida. Executar apenas em laboratório e trocar a senha no fim.",
+      "fixes": [
+        "root/fix-passwords.php"
+      ]
+    },
+    "root/fix-passwords.php": {
+      "title": "Regressar às senhas de fábrica",
+      "group": "users",
+      "mode": "destructive",
+      "summary": "Faz rehash bcrypt de admin123/operator123 para admin@, operator1@ e operator2@labcontrol.local.",
+      "expect": "JSON por conta com estado FIXED ou FAILED.",
+      "side_effects": "Sobrepõe as senhas atuais das três contas.",
+      "requires": [
+        "database"
+      ],
+      "warn": "Depois de entrar, cria senhas fortes; estas contas ficam acessíveis com valores públicos do repositório.",
+      "fixes": [
+        "root/test-all-logins.php"
+      ]
+    },
+    "root/debug-list-users.php": {
+      "title": "Listar usuários da tabela users",
+      "group": "users",
+      "mode": "sensitive",
+      "summary": "SELECT de todos os registros de users (id, email, role, ativo, último login).",
+      "expect": "Tabela de contas. Serve para confirmar se a conta que você usa existe e está ativa.",
+      "fixes": [
+        "root/debug-password-check.php"
+      ]
+    },
+    "root/debug-users.php": {
+      "title": "Usuários com buffer de erro",
+      "group": "users",
+      "mode": "sensitive",
+      "summary": "O mesmo levantamento de users mas com ob_start, para captar avisos PHP que sujam o JSON da API.",
+      "expect": "Conteúdo de users mais os avisos capturados antes do primeiro header.",
+      "fixes": [
+        "backend/test-auth.php"
+      ]
+    },
+    "root/debug-password-check.php": {
+      "title": "Verificar senha de cada conta",
+      "group": "users",
+      "mode": "sensitive",
+      "summary": "Passa password_verify das senhas padrão do repositório sobre cada hash guardado e mostra o algoritmo usado.",
+      "expect": "JSON com booleano por conta e prefixo do hash.",
+      "warn": "A saída revela explicitamente que contas ainda aceitam 'admin123'/'operator123'.",
+      "fixes": [
+        "root/fix-passwords.php"
+      ]
+    },
+    "root/test-all-logins.php": {
+      "title": "Testar senhas padrão em todas as contas",
+      "group": "users",
+      "mode": "sensitive",
+      "summary": "Cruza as contas existentes com as credenciais de exemplo do repositório e reporta quais aceitam login.",
+      "expect": "USER_NOT_FOUND / MATCH / NO_MATCH por email.",
+      "fixes": [
+        "root/debug-list-users.php"
+      ]
+    },
+    "root/manual-check.php": {
+      "title": "Ping manual a todos os hosts",
+      "group": "net",
+      "mode": "read",
+      "summary": "Percorre os hosts ativos do banco de dados e executa pingHost() um a um.",
+      "expect": "Por host: nome, IP e ONLINE/OFFLINE com a latência do comando.",
+      "fixes": [
+        "root/test-ping.php"
+      ]
+    },
+    "root/debug-db-host.php": {
+      "title": "Registro de um host no banco de dados",
+      "group": "net",
+      "mode": "read",
+      "summary": "Imprime a linha completa de LAB17-PC18 (IP, MAC, estado, credenciais associadas).",
+      "expect": "Key/value do registro. Altera o hostname no arquivo para outra máquina.",
+      "fixes": [
+        "root/manual-check.php"
+      ]
+    },
+    "root/test-ping.php": {
+      "title": "Ping com parsing próprio",
+      "group": "net",
+      "mode": "read",
+      "summary": "Executa ping e tenta interpretar a resposta linha a linha, tal como o backend o faz.",
+      "expect": "Linha por linha da saída do SO; mostra por que motivo um host responde mas aparece offline.",
+      "fixes": [
+        "root/test-ping-server.php"
+      ]
+    },
+    "root/test-ping-server.php": {
+      "title": "Ping pelo helper do backend",
+      "group": "net",
+      "mode": "read",
+      "summary": "Chama diretamente pingHost() de config.php para 192.168.20.169, isolando o helper do resto do código.",
+      "expect": "ONLINE ou OFFLINE em uma linha.",
+      "fixes": [
+        "root/test-control-path.php"
+      ]
+    },
+    "root/test-control-path.php": {
+      "title": "Caminhos dos scripts PowerShell",
+      "group": "powershell",
+      "mode": "read",
+      "summary": "Confirma que Get-Processes.ps1 é encontrado a partir do servidor e que o temp dir aceita escrita de .ps1.",
+      "expect": "Exists: YES/NO e SUCCESS/FAILED na escrita temporária.",
+      "fixes": [
+        "root/test-path.php"
+      ]
+    },
+    "root/test-path.php": {
+      "title": "Temp dir e separador de caminho",
+      "group": "powershell",
+      "mode": "read",
+      "summary": "sys_get_temp_dir(), separador e ciclo de escrita/apagamento de um .ps1 temporário.",
+      "expect": "Quatro linhas. Falha aqui = WinRM nunca vai conseguir gerar o script remoto.",
+      "fixes": [
+        "root/test-control-path.php"
+      ]
+    },
+    "root/test-proc-output.php": {
+      "title": "Parser de saída do PowerShell",
+      "group": "powershell",
+      "mode": "read",
+      "summary": "Passa três saídas sintéticas (JSON válido, JSON de erro, texto bruto) pela função que converte output do PowerShell em array.",
+      "expect": "Três blocos print_r: deve ler o JSON, marcar erro e não rebentar com texto bruto.",
+      "fixes": [
+        "backend/test-powershell-output.php"
+      ]
+    },
+    "backend/test-powershell-output.php": {
+      "title": "Teste unitário do parser (sem Apache)",
+      "group": "powershell",
+      "mode": "read",
+      "summary": "Testa o parser de saída sem banco de dados nem Windows: executa por isso também em CLI (php tests/backend/test-powershell-output.php).",
+      "expect": "Lista de casos com PASSO/FALHADO e código de saída do processo.",
+      "cli": "php tests/backend/test-powershell-output.php",
+      "fixes": [
+        "root/test-proc-output.php"
+      ]
+    },
+    "frontend/debug-login.html": {
+      "title": "Consola de login no navegador",
+      "group": "frontend",
+      "mode": "read",
+      "summary": "Formulário standalone que chama api/auth.php?action=login a partir do browser e mostra o token retornado.",
+      "expect": "Abre num painel interativo: pedido, resposta HTTP e JSON formatado.",
+      "runner": "frame",
+      "fixes": [
+        "root/test-login-request.php"
+      ]
+    },
+    "backend/force-clear-cache.php": {
+      "title": "Limpar cache e destruir sessão",
+      "group": "maint",
+      "mode": "cli",
+      "summary": "Faz session_start + session_destroy e limpa o cookie de sessão. Foi escrito para a versão antiga, em que a app usava sessões PHP.",
+      "expect": "Texto 'Cache limpo e sessão encerrada.'",
+      "blocked": "Executar este script dentro da página de testes terminava a sessão desta mesma página. Deixou de ter efeito prático: a app atual não usa sessões PHP — o login é por token JWT.",
+      "cli": "php tests/backend/force-clear-cache.php",
+      "fixes": []
+    }
+  }
+}

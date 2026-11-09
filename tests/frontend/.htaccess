@@ -1,0 +1,12 @@
+# Este diretório tem uma página HTML de depuração (debug-login.html) que é
+# interativa — precisa de JavaScript ativo. Mesmo assim não é servida por URL
+# direto: o painel pede-a a index.php?run=1&view=frontend…, que injeta um <base>
+# para os caminhos relativos continuarem a funcionar e aplica o portão de acesso.
+
+<IfModule mod_authz_core.c>
+    Require all denied
+</IfModule>
+<IfModule !mod_authz_core.c>
+    Order allow,deny
+    Deny from all
+</IfModule>

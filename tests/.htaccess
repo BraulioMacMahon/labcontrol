@@ -1,12 +1,72 @@
-# Protege os scripts de debug/testes de acesso via web.
-# Estes scripts podem (re)criar usuários e expor dados; nunca devem ficar
-# acessíveis em produção. Mantenha esta pasta fora do docroot ou com esta negação.
+# =====================================================
+# LabControl — área de testes  →  http://localhost/labcontrol/tests
+# =====================================================
+#
+# Esta pasta contém utilitários que recriam contas, alteram schemas e
+# despejam logs. O acesso é deliberadamente SEPARADO da aplicação:
+#
+#   • o ponto de entrada é sempre index.php, que aplica o portão (gate.php):
+#     kill-switch → rede → sessão própria → bilhete para scripts que escrevem;
+#   • os utilitários em root/, backend/ e frontend/ não têm URL público
+#     (ver os .htaccess dentro de cada uma dessas pastas);
+#   • para desligar a área numa instalação de produção: crie um arquivo
+#     vazio tests/DISABLED, ou define TESTS_ENABLED=false no .env.
+#
+# Sem este arquivo, o DirectoryIndex deixa de funcionar e /labcontrol/tests
+# passa a devolver 403 (Options -Indexes) ou listagem de diretórios.
+# =====================================================
+
+Options -Indexes -MultiViews
+DirectoryIndex index.php
+
 <IfModule mod_rewrite.c>
     RewriteEngine On
-    RewriteRule ^ - [F,L]
+
+    # /labcontrol/tests → o painel (o redirect de barra final já trata do resto)
+    RewriteRule ^$ index.php [L]
+
+    # Includes internas: só fazem sentido carregadas por index.php/api.php
+    RewriteRule ^(gate|registry|checks)\.php$ - [F,L]
+    RewriteRule ^catalog\.json$ - [F,L]
+    RewriteRule ^DISABLED$ - [F,L]
+    RewriteRule ^README\.md$ - [F,L]
+    RewriteRule ^\.state/ - [F,L]
 </IfModule>
 
-<IfModule !mod_rewrite.c>
-    Order allow,deny
-    Deny from all
+# Arquivos de trabalho e documentação fora do alcance do browser,
+# mesmo em Apache sem mod_rewrite.
+<FilesMatch "\.(json|md|log|ini|sql|sh|state)$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order allow,deny
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+<FilesMatch "^(gate|registry|checks)\.php$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order allow,deny
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+# O painel reflete o estado do servidor: não pode sair de cache.
+<FilesMatch "^(index|api)\.php$">
+    <IfModule mod_headers.c>
+        Header set Cache-Control "no-store, max-age=0"
+        Header set X-Robots-Tag "noindex, nofollow, noarchive"
+        Header set X-Content-Type-Options "nosniff"
+    </IfModule>
+</FilesMatch>
+
+# Interface estática: curta mas cacheável, para a página abrir depressa.
+<IfModule mod_expires.c>
+    ExpiresActive On
+    ExpiresByType text/css "access plus 10 minutes"
+    ExpiresByType application/javascript "access plus 10 minutes"
 </IfModule>
