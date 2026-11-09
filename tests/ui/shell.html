@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="pt-br" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Bancada de Testes · LabControl</title>
+    <meta name="description" content="Diagnóstico, scripts de teste e verificações de ambiente do LabControl. Acesso separado da aplicação, reservado a administradores.">
+    <meta name="robots" content="noindex, nofollow">
+    <link rel="icon" href="../labcontrol-frontend/img/logo_imetro.png" type="image/png">
+    <link rel="stylesheet" href="ui/style.css">
+    <!--lc:bootstrap-->
+</head>
+<body class="lc-body" data-auth="unknown" data-ready="0">
+<a class="lc-skip" href="#lc-catalog">Saltar para o catálogo de scripts</a>
+
+<header class="lc-topbar">
+    <div class="lc-topbar-inner">
+        <div class="lc-brand">
+            <span class="lc-brand-mark" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v5.5L3.8 17A2.5 2.5 0 0 0 6 20.5h12A2.5 2.5 0 0 0 20.2 17L16 7.5V2"/><path d="M7 2h10"/><path d="M6.5 14h11"/></svg>
+            </span>
+            <div class="lc-brand-text">
+                <h1 class="lc-brand-title">Bancada de Testes</h1>
+                <p class="lc-brand-kicker" id="lc-brand-kicker">LabControl · diagnóstico de infraestrutura</p>
+            </div>
+        </div>
+
+        <div class="lc-env" id="lc-env" aria-label="Ambiente do servidor"></div>
+
+        <div class="lc-topbar-actions">
+            <button type="button" class="lc-btn lc-btn-icon" data-act="refresh" title="Sondar o servidor de novo (R)">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg>
+                <span>Sondar</span>
+            </button>
+            <a class="lc-btn lc-btn-ghost" href="../labcontrol-frontend/">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/></svg>
+                <span>Aplicação</span>
+            </a>
+            <div class="lc-session" id="lc-session" hidden>
+                <span class="lc-session-user" id="lc-session-user"></span>
+                <span class="lc-session-sep" aria-hidden="true">·</span>
+                <span class="lc-session-timer" id="lc-session-timer" title="Tempo até a sessão da bancada expirar"></span>
+                <button type="button" class="lc-session-out" data-act="logout" title="Terminar apenas esta sessão (a aplicação não é tocada)">Sair</button>
+            </div>
+        </div>
+    </div>
+</header>
+
+<main class="lc-main">
+
+    <!-- ============================================================ -->
+    <!-- Porta de entrada: usa a conta LabControl, não um segredo novo -->
+    <!-- ============================================================ -->
+    <section class="lc-gate" id="lc-auth-gate" hidden>
+        <div class="lc-gate-card">
+            <p class="lc-eyebrow">Acesso reservado</p>
+            <h2 class="lc-gate-title">Entre com a sua conta LabControl</h2>
+            <p class="lc-gate-lede">
+                Esta página mexe em schemas, caches e contas do laboratório, por isso vive
+                <em>fora</em> da aplicação e exige um perfil de
+                <strong id="lc-gate-roles">admin</strong>. Não há segredo paralelo: a senha é
+                confirmada pela própria API da app: só um token válido abre a porta.
+            </p>
+
+            <form class="lc-form" id="lc-login-form" autocomplete="on">
+                <label class="lc-field">
+                    <span class="lc-field-label">Email</span>
+                    <input class="lc-input" type="email" name="email" id="lc-login-email"
+                           placeholder="admin@labcontrol.local" autocomplete="username" required>
+                </label>
+                <label class="lc-field">
+                    <span class="lc-field-label">Senha</span>
+                    <input class="lc-input" type="password" name="password" id="lc-login-password"
+                           placeholder="••••••••••••" autocomplete="current-password" required minlength="6">
+                </label>
+                <p class="lc-form-status" id="lc-login-status" role="status" aria-live="polite"></p>
+                <button type="submit" class="lc-btn lc-btn-primary lc-btn-block" id="lc-login-submit">Entrar na bancada</button>
+            </form>
+
+            <ul class="lc-gate-notes">
+                <li>O token da aplicação é reaproveitado automaticamente quando existe no navegador.</li>
+                <li>Tentativas de entrada passam pelo rate limiting e pela auditoria do <code>auth.php</code>.</li>
+                <li>Instalação nova sem contas? <code>php labcontrol-backend/setup.php --email=… --password=…</code></li>
+            </ul>
+        </div>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- Painel -->
+    <!-- ============================================================ -->
+    <div class="lc-panel-wrap" id="lc-app" hidden>
+
+        <section class="lc-hero" id="lc-hero" aria-live="polite">
+            <div class="lc-hero-state" id="lc-hero-state"></div>
+            <div class="lc-hero-counts" id="lc-hero-counts"></div>
+            <div class="lc-hero-hint" id="lc-hero-hint"></div>
+        </section>
+
+        <section class="lc-block" id="lc-status">
+            <header class="lc-block-head">
+                <div>
+                    <p class="lc-eyebrow">Verificações automáticas</p>
+                    <h2 class="lc-block-title">Estado do sistema</h2>
+                </div>
+                <div class="lc-block-tools">
+                    <span class="lc-updated" id="lc-checks-updated"></span>
+                    <button type="button" class="lc-btn lc-btn-tiny" data-act="checks-fresh">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg>
+                        Re-sondar
+                    </button>
+                </div>
+            </header>
+            <div class="lc-checks" id="lc-checks">
+                <div class="lc-skeleton"></div>
+            </div>
+        </section>
+
+        <div class="lc-columns">
+            <section class="lc-block" id="lc-connectivity">
+                <header class="lc-block-head">
+                    <div>
+                        <p class="lc-eyebrow">Antes de tocar nos hosts</p>
+                        <h2 class="lc-block-title">Diagnóstico de conectividade</h2>
+                    </div>
+                </header>
+                <p class="lc-block-lede">
+                    As mesmas três sondas que a aplicação fazia no separador <em>Testes</em>:
+                    API + banco de dados, sessão WinRM e um magic packet manual. São sempre chamadas
+                    às rotas normais do backend — nada aqui contorna a API.
+                </p>
+                <div class="lc-diag" id="lc-diag">
+                    <div class="lc-diag-controls">
+                        <label class="lc-field">
+                            <span class="lc-field-label">Host alvo</span>
+                            <select class="lc-input" id="lc-diag-host"></select>
+                        </label>
+                        <button type="button" class="lc-btn lc-btn-primary" data-act="run-diag" id="lc-diag-run">Executar diagnóstico seguro</button>
+                        <button type="button" class="lc-btn lc-btn-quiet" data-act="test-wol" id="lc-diag-wol">Testar WOL</button>
+                    </div>
+                    <ol class="lc-diag-results" id="lc-diag-results"></ol>
+                </div>
+            </section>
+
+            <section class="lc-block lc-block-side" id="lc-guard">
+                <header class="lc-block-head">
+                    <div>
+                        <p class="lc-eyebrow">Acesso separado</p>
+                        <h2 class="lc-block-title">Como esta porta funciona</h2>
+                    </div>
+                </header>
+                <ul class="lc-rules" id="lc-rules"></ul>
+                <p class="lc-rules-foot">
+                    Ficha completa em <code>tests/README.md</code> e no
+                    <a href="../docs/INDEX.md" target="_blank" rel="noopener">índice de documentação</a>.
+                </p>
+            </section>
+        </div>
+
+        <section class="lc-block" id="lc-catalog">
+            <header class="lc-block-head">
+                <div>
+                    <p class="lc-eyebrow">Script a script</p>
+                    <h2 class="lc-block-title">Catálogo da bancada</h2>
+                </div>
+                <div class="lc-block-tools">
+                    <span class="lc-updated" id="lc-catalog-updated"></span>
+                </div>
+            </header>
+
+            <div class="lc-toolbar">
+                <label class="lc-search">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                    <input type="search" id="lc-search" placeholder="Procurar por nome, pasta, senha, ping, WinRM…  (tecla /)" aria-label="Procurar scripts">
+                    <kbd>/</kbd>
+                </label>
+                <div class="lc-chips" id="lc-filter-modes" role="group" aria-label="Filtrar por risco"></div>
+            </div>
+            <div class="lc-chips lc-chips-groups" id="lc-filter-groups" role="group" aria-label="Filtrar por categoria"></div>
+
+            <div class="lc-groups" id="lc-groups"></div>
+            <p class="lc-empty" id="lc-empty" hidden></p>
+        </section>
+    </div>
+</main>
+
+<footer class="lc-foot">
+    <span id="lc-foot-build">LabControl · bancada de diagnóstico</span>
+    <span class="lc-foot-keys"><kbd>/</kbd> procurar · <kbd>J</kbd>/<kbd>K</kbd> navegar · <kbd>Enter</kbd> executar · <kbd>Esc</kbd> fechar</span>
+</footer>
+
+<!-- ============================================================ -->
+<!-- Painel de execução (drawer) -->
+<!-- ============================================================ -->
+<aside class="lc-runner" id="lc-runner" hidden aria-label="Painel de execução" aria-modal="false">
+    <header class="lc-runner-head">
+        <div class="lc-runner-id">
+            <p class="lc-runner-kicker" id="lc-run-kicker">Preparando…</p>
+            <h2 class="lc-runner-title" id="lc-run-title"></h2>
+            <code class="lc-runner-path" id="lc-run-path"></code>
+        </div>
+        <div class="lc-runner-head-tools">
+            <span class="lc-run-state" id="lc-run-state" role="status" aria-live="polite"></span>
+            <button type="button" class="lc-btn lc-btn-icon" data-act="run-rerun" title="Executar outra vez">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg>
+            </button>
+            <button type="button" class="lc-btn lc-btn-icon" data-act="run-close" title="Fechar (Esc)">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+            </button>
+        </div>
+    </header>
+
+    <div class="lc-runner-facts" id="lc-run-facts"></div>
+
+    <div class="lc-runner-tabs" id="lc-run-tabs" hidden>
+        <button type="button" class="lc-tab is-on" data-act="run-tab" data-tab="read">Leitura LabControl</button>
+        <button type="button" class="lc-tab" data-act="run-tab" data-tab="raw">Formato original</button>
+        <span class="lc-runner-tab-note" id="lc-run-tab-note"></span>
+    </div>
+
+    <div class="lc-runner-body">
+        <div class="lc-runner-read" id="lc-run-read"></div>
+        <iframe class="lc-runner-frame" id="lc-run-frame" title="Saída do script em formato original" hidden sandbox="allow-same-origin allow-forms allow-modals"></iframe>
+    </div>
+
+    <footer class="lc-runner-foot">
+        <span class="lc-runner-foot-info" id="lc-run-foot-info"></span>
+        <div class="lc-runner-foot-tools">
+            <a class="lc-btn lc-btn-tiny" id="lc-run-open" href="#" target="_blank" rel="noopener">Abrir em nova aba</a>
+            <button type="button" class="lc-btn lc-btn-tiny" data-act="run-copy">Copiar URL</button>
+            <button type="button" class="lc-btn lc-btn-tiny" data-act="run-download">Descarregar saída</button>
+        </div>
+    </footer>
+
+    <!-- Degrau de confirmação -->
+    <div class="lc-confirm" id="lc-confirm" hidden>
+        <div class="lc-confirm-card" role="dialog" aria-modal="true" aria-labelledby="lc-confirm-title">
+            <p class="lc-confirm-eyebrow" id="lc-confirm-eyebrow">Confirmação</p>
+            <h3 id="lc-confirm-title">Este script escreve no servidor</h3>
+            <p class="lc-confirm-lede" id="lc-confirm-lede"></p>
+            <ul class="lc-confirm-list" id="lc-confirm-list"></ul>
+            <form class="lc-confirm-form" id="lc-confirm-form">
+                <label class="lc-field" id="lc-confirm-word-wrap" hidden>
+                    <span class="lc-field-label">Escreve <code id="lc-confirm-word">EXECUTAR</code> para confirmar</span>
+                    <input class="lc-input" type="text" id="lc-confirm-word-input" autocomplete="off" spellcheck="false">
+                </label>
+                <div id="lc-confirm-auth">
+                    <p class="lc-confirm-auth-note">
+                        Passo extra para operações irreversíveis: confirme a sua senha.
+                        É validada pela <code>auth.php</code> da aplicação e emite um bilhete
+                        de <span id="lc-confirm-ttl">60</span> segundos, usável uma única vez.
+                    </p>
+                    <label class="lc-field">
+                        <span class="lc-field-label">Senha de <span id="lc-confirm-email">—</span></span>
+                        <input class="lc-input" type="password" id="lc-confirm-password" autocomplete="current-password">
+                    </label>
+                </div>
+                <p class="lc-form-status" id="lc-confirm-status" role="status" aria-live="polite"></p>
+                <div class="lc-confirm-actions">
+                    <button type="button" class="lc-btn lc-btn-quiet" data-act="confirm-cancel">Cancelar</button>
+                    <button type="submit" class="lc-btn lc-btn-danger" id="lc-confirm-go">Executar agora</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</aside>
+
+<div class="lc-toasts" id="lc-toasts" aria-live="polite" aria-atomic="false"></div>
+
+<script src="ui/app.js" defer></script>
+</body>
+</html>

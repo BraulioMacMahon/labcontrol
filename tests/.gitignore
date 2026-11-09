@@ -1,0 +1,13 @@
+# Estado local da bancada de testes — nunca versionar.
+# .state/ guarda os arquivos de sessão quando o host não tem tmp_path acessível
+# e leva os bilhetes já usados (anti-replay). Num XAMPP normal o PHP usa o
+# save_path do próprio php.ini e esta pasta pode nem chegar a existir.
+.state/
+
+# Kill-switch local: tests/DISABLED desliga a área nessa máquina sem tocar no git.
+# Deixar existir um arquivo destes no repositório desligaria a bancada de todos.
+DISABLED
+
+# Arquivos que os utilitários deixam para trás ao executar.
+*.log
+.snapshot/

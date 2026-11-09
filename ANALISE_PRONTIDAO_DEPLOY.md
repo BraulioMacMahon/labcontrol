@@ -35,6 +35,8 @@ Vários scripts são destrutivos/info-disclosure:
 
 **Correção:** nunca implantar a pasta `tests/` em produção (ou mover para fora do docroot e adicionar `.htaccess` de negação). Remover scripts que recreiam credenciais conhecidas.
 
+**Estado atual (2026-11-09):** a negação total foi substituída pela bancada `http://localhost/labcontrol/tests` (`tests/README.md`). Os URLs diretos dos utilitários continuam retornando 403 pelo Apache e, mesmo com o rewrite desligado, `index.php` exige sessão própria obtida com a conta admin. Em produção basta criar `tests/DISABLED` (ou `TESTS_ENABLED=false`) para a área responder 503 a tudo; os scripts destrutivos nunca são executados sem reconfirmação de senha.
+
 ### B3. Credenciais padrão semeadas no banco (`database.sql`)
 `labcontrol-backend/sql/database.sql` insere usuários com senhas conhecidas e comprometidas no repositório:
 - `admin@labcontrol.local` / `admin123`
@@ -179,7 +181,7 @@ As seguintes remediações foram implementadas na branch `arena/01a02d64-labcont
 | ID | Correção | Arquivo(s) |
 |----|----------|-----------|
 | B1 | Restaurados `beginTransaction/commit/rollback/inTransaction` e `getDefaultCredentials/saveDefaultCredentials/updateHostCredentials/getAllCredentials/deleteCredentials` na `Database.php` ativa (estavam só no `Database_backup.php`) → endpoints `set-credentials`, `get-credentials`, `set-host-credentials` e `import` deixam de dar 500 | `labcontrol-backend/includes/Database.php` |
-| B2 | Adicionado `tests/.htaccess` (negação total) para bloquear acesso web aos scripts de debug | `tests/.htaccess` (novo) |
+| B2 | `tests/.htaccess` deixou de ser negação total e passou a **portão com sessão**: a pasta virou a página `/labcontrol/tests` (login com a conta admin da app, `root/`+`backend/`+`frontend/` negados ao Apache, scripts destrutivos só com confirmação + bilhete assinado de 60 s e uso único). Ver `tests/README.md` | `tests/.htaccess`, `tests/gate.php`, `tests/index.php`, `tests/api.php`, `tests/ui/*` (novos) |
 | B3 | Removidas credenciais padrão semeadas (`admin123`/`operator123`) do `database.sql` | `labcontrol-backend/sql/database.sql` |
 | B4 | `ENCRYPTION_KEY`/`JWT_SECRET` sem fallback hardcoded no código: se ausentes/fracas, **auto-gera chaves únicas por instalação e persiste no `.env`** (self-bootstrap) — elimina a chave pública E evita que o backend quebre | `labcontrol-backend/config/config.php` |
 | B5 | `baseURL` da API agora usa `location.origin` (herda HTTPS/host) e é sobrescrevível via `window.LABCONTROL_API_BASE_URL`; adicionado HSTS no `.htaccess` | `labcontrol-frontend/api-service.js`, `labcontrol-backend/.htaccess` |

@@ -1,138 +1,226 @@
 <?php
 /**
- * LabControl - Test Management Interface
- * Dashboard central para execução de scripts de teste, debug e utilitários.
+ * LabControl — Bancada de testes e diagnóstico
+ * ============================================
+ *
+ * Ponto de entrada único de /labcontrol/tests:
+ *
+ *   tests/                          → painel (o shell + dados, renderizados no servidor)
+ *   tests/index.php?run=1&view=…     → executa um script e retorna a saída dele
+ *
+ * Não há mais URLs públicos para tests/root/* nem tests/backend/*: o .htaccess
+ * reencaminha tudo por aqui, por forma a que o portão (gate.php) seja sempre
+ * atravessado — inclusive quando alguém escreve o caminho do script à mão na barra
+ * de endereço. Ver tests/README.md.
  */
 
-$testDirs = [
-    'Root Tests' => 'root',
-    'Backend API Tests' => 'backend',
-    'Frontend Debug' => 'frontend'
+require_once __DIR__ . '/registry.php';
+require_once __DIR__ . '/checks.php';
+
+$config = lcTestsConfig();
+$action = $_GET['run'] ?? null;
+$view = $_GET['view'] ?? '';
+
+// -----------------------------------------------------------------
+// 1. Kill-switch e rede
+// -----------------------------------------------------------------
+if (!$config['enabled']) {
+    lcTestsDeny(
+        503,
+        'Bancada de testes desativada',
+        'Esta área está desligada nesta instalação.',
+        'Para a reativar: apaga tests/DISABLED e/ou define TESTS_ENABLED=true no .env, depois recarrega.'
+    );
+    exit;
+}
+
+if (!lcTestsIpAllowed()) {
+    lcTestsDeny(
+        403,
+        'Fora da rede autorizada',
+        'Seu endereço ' . lcTestsClientIp() . ' não está na lista TESTS_ALLOWED_IPS.',
+        'Ajusta TESTS_ALLOWED_IPS no .env (IPs ou CIDRs separados por vírgula) ou remove a variável para liberar o acesso autenticado.'
+    );
+    exit;
+}
+
+// -----------------------------------------------------------------
+// 2. Execução de um script (?run=1&view=…)
+// -----------------------------------------------------------------
+if ($action !== null && $action !== '') {
+    if (!is_string($view) || $view === '') {
+        lcTestsDeny(400, 'Falta o script', 'Pedido de execução sem o parâmetro view.');
+        exit;
+    }
+
+    $resolved = lcTestsResolveView($view);
+    if ($resolved === null) {
+        lcTestsDeny(
+            404,
+            'Script não encontrado',
+            '«' . $view . '» não corresponde a um arquivo dentro de tests/root, tests/backend ou tests/frontend.',
+            'Apenas arquivos .php e .html dessas três pastas podem ser executados pela bancada.'
+        );
+        exit;
+    }
+
+    $meta = lcTestsScriptMeta($resolved['rel']);
+
+    if (!empty($meta['blocked'])) {
+        lcTestsDeny(403, 'Script indisponível na web', (string)$meta['blocked'], $meta['cli'] ? 'Executar por linha de comandos: ' . $meta['cli'] : '');
+        exit;
+    }
+
+    // Autenticação — o output dos scripts nunca é público.
+    $auth = lcTestsAuthState();
+    if (empty($auth['authenticated'])) {
+        lcTestsSendHeaders('json');
+        http_response_code(401);
+        echo json_encode([
+            'success' => false,
+            'status' => 401,
+            'message' => 'Sessão da bancada terminada ou inexistente.',
+            'reason' => $auth['reason'] ?? 'no_session',
+            'login' => './',
+        ], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    // Degrau extra para scripts que escrevem/destróem: bilhete de uso único.
+    if (lcTestsNeedsGrant($meta)) {
+        $grant = $_GET['_g'] ?? '';
+        if (!lcTestsGrantConsume($resolved['rel'], is_string($grant) ? $grant : '')) {
+            lcTestsDeny(
+                403,
+                'Confirmação necessária',
+                $meta['mode'] === 'destructive'
+                    ? 'Este script altera dados de forma irreversível e só executa através do painel, depois de confirmar a sua senha.'
+                    : 'Este script escreve no servidor e tem de ser disparado pelo painel (botão «Executar»).' . "\n"
+                        . 'Um bilhete expirado também produz esta mensagem: volta ao painel e pede um novo.',
+                $meta['side_effects'] ?: ''
+            );
+            exit;
+        }
+    }
+
+    // Scripts que assumem o banco de dados: uma conexão interrompida no meio de um ALTER
+    // TABLE é pior que não executar nada, por isso sonda-se antes de entregar o controlo.
+    if (in_array('database', $meta['requires'], true) && !lcTestsDatabaseReachable()) {
+        lcTestsDeny(
+            503,
+            'Banco de dados inacessível',
+            '«' . $config['db']['name'] . '» em ' . $config['db']['host'] . ' não respondeu. Este script precisa da conexão completa antes de começar.',
+            'Veja o cartão «Banco de dados» no painel, confirma o MySQL no XAMPP Control Panel e tente novamente.'
+        );
+        exit;
+    }
+
+    // A partir daqui o controlo passa ao script: headers dele, saída dele.
+    lcTestsSendHeaders('view');
+    $isHtml = preg_match('/\.html$/i', $resolved['file']);
+
+    if ($isHtml) {
+        // O HTML dos scripts de frontend usa caminhos relativos que só fazem
+        // sentido a partir de tests/frontend/. Como a resposta sai de index.php,
+        // injeta-se um <base> para que fetch()/links continuem a funcionar.
+        $document = (string)file_get_contents($resolved['file']);
+        $base = htmlspecialchars(rtrim(dirname($_SERVER['SCRIPT_NAME'] ?? 'index.php'), '/') . '/' . dirname($resolved['rel']) . '/', ENT_QUOTES, 'UTF-8');
+        $tag = '<base href="' . $base . '">';
+        if (stripos($document, '<head') !== false) {
+            $document = preg_replace('/<head\b[^>]*>/i', '$0' . $tag, $document, 1);
+        } else {
+            $document = $tag . $document;
+        }
+        header('Content-Type: text/html; charset=utf-8');
+        echo $document;
+        exit;
+    }
+
+    // .php → executa no contexto do pedido (o script trata dos seus headers).
+    // Os includes internos dos scripts usam __DIR__, por isso continuam a
+    // encontrar labcontrol-backend/ a partir da sua própria pasta.
+    $cwdBackup = getcwd();
+    @chdir(dirname($resolved['file']));
+    try {
+        include $resolved['file'];
+    } catch (Throwable $e) {
+        http_response_code(500);
+        header('Content-Type: text/plain; charset=utf-8');
+        echo "O script rebentou antes de produzir resposta.\n\n"
+            . get_class($e) . ': ' . $e->getMessage() . "\n"
+            . ' em ' . str_replace('\\', '/', $e->getFile()) . ':' . $e->getLine() . "\n";
+        error_log('LabControl bancada: ' . $e->getMessage());
+    } finally {
+        if ($cwdBackup !== false) {
+            @chdir($cwdBackup);
+        }
+    }
+    exit;
+}
+
+// -----------------------------------------------------------------
+// 3. O painel
+// -----------------------------------------------------------------
+$auth = lcTestsAuthState();
+$authenticated = !empty($auth['authenticated']);
+$force = isset($_GET['checks']) && $_GET['checks'] === 'fresh';
+$checks = $authenticated ? lcTestsChecksCached($force) : null;
+$catalog = $authenticated ? lcTestsCatalog() : null;
+
+$bootstrap = [
+    'authenticated' => !empty($auth['authenticated']),
+    'reason' => $auth['reason'] ?? null,
+    'user' => $auth['user'] ?? null,
+    'expires_at' => $auth['expires_at'] ?? null,
+    'sign_in_at' => $auth['sign_in_at'] ?? null,
+    'csrf' => $auth['csrf'] ?? null,
+    'server_time' => time(),
+    'config' => [
+        'api_base' => '../labcontrol-backend/api',
+        'app_url' => '../labcontrol-frontend/',
+        'docs_url' => '../docs/INDEX.md',
+        'allowed_roles' => $config['allowed_roles'],
+        'grant_seconds' => $config['grant_seconds'],
+        'session_minutes' => $config['session_minutes'],
+        'idle_minutes' => $config['idle_minutes'],
+        'reauth_max_age' => $config['reauth_max_age'],
+        'ip_restricted' => !empty($config['allowed_ips']),
+        'debug_mode' => $config['debug_mode'],
+    ],
+    'runtime' => [
+        'php' => PHP_VERSION,
+        'os' => PHP_OS,
+        'timezone' => date_default_timezone_get(),
+        'path' => '/labcontrol/tests',
+        'requested' => $view,
+    ],
+    'modes' => lcTestsModeLabels(),
+    // Antes do login não se lista nada: os nomes dos utilitários, os caminhos e
+    // as descrições já diriam demasiado a alguém que apanhasse o URL por engano.
+    'catalog' => $authenticated ? $catalog : null,
+    'checks' => $checks,
 ];
 
-function getFiles($dir) {
-    if (!is_dir(__DIR__ . '/' . $dir)) return [];
-    $files = scandir(__DIR__ . '/' . $dir);
-    return array_filter($files, function($f) {
-        return !in_array($f, ['.', '..']) && (strpos($f, '.php') !== false || strpos($f, '.html') !== false);
-    });
+$shell = __DIR__ . '/ui/shell.html';
+if (!is_file($shell) || !is_readable($shell)) {
+    lcTestsDeny(500, 'Interface em falta', 'tests/ui/shell.html não foi encontrado no servidor.');
+    exit;
 }
-?>
-<!DOCTYPE html>
-<html lang="pt-br" class="dark">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LabControl | Test Management</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <style>
-        body {
-            font-family: 'Plus Jakarta Sans', sans-serif;
-            background-color: #050505;
-            color: #e2e8f0;
-        }
-        .glass-panel {
-            background: rgba(15, 15, 15, 0.75);
-            backdrop-filter: blur(20px) saturate(180%);
-            border: 1px solid rgba(255, 255, 255, 0.08);
-        }
-        .glass-card {
-            background: rgba(255, 255, 255, 0.03);
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.05);
-            transition: all 0.3s ease;
-        }
-        .glass-card:hover {
-            background: rgba(255, 255, 255, 0.06);
-            border-color: rgba(59, 130, 246, 0.3);
-            transform: translateY(-2px);
-        }
-        .custom-scrollbar::-webkit-scrollbar { width: 5px; }
-        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); border-radius: 20px; }
-    </style>
-</head>
-<body class="p-8 md:p-12 min-h-screen flex flex-col items-center">
-    
-    <div class="w-full max-w-6xl space-y-12">
-        <!-- Header -->
-        <header class="flex flex-col md:flex-row md:items-center justify-between gap-6">
-            <div>
-                <h1 class="text-4xl font-black text-white tracking-tight flex items-center gap-3">
-                    <span class="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-xl">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
-                    </span>
-                    Test Management
-                </h1>
-                <p class="text-blue-500 font-bold uppercase tracking-[0.2em] text-[10px] mt-2 ml-1">Infrastructure Debugging Suite</p>
-            </div>
-            <a href="../labcontrol-frontend/" class="px-6 py-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-2xl text-sm font-bold transition-all flex items-center gap-2">
-                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
-                Voltar ao App
-            </a>
-        </header>
 
-        <!-- Main Content -->
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            <?php foreach ($testDirs as $title => $dir): ?>
-                <section class="glass-panel p-6 rounded-[2.5rem] flex flex-col min-h-[400px]">
-                    <div class="flex items-center justify-between mb-6 px-2">
-                        <h2 class="text-xl font-bold text-white"><?php echo $title; ?></h2>
-                        <span class="px-3 py-1 bg-white/5 rounded-full text-[10px] font-mono text-blue-400">
-                            /<?php echo $dir; ?>
-                        </span>
-                    </div>
-                    
-                    <div class="flex-1 space-y-3 overflow-y-auto pr-2 custom-scrollbar">
-                        <?php 
-                        $files = getFiles($dir);
-                        if (empty($files)): ?>
-                            <p class="text-gray-600 text-xs text-center py-10 italic">Nenhum script encontrado.</p>
-                        <?php else: 
-                            foreach ($files as $file): 
-                                $isFix = strpos($file, 'fix-') !== false;
-                                $isDebug = strpos($file, 'debug-') !== false;
-                                $isTest = strpos($file, 'test-') !== false;
-                                
-                                $iconColor = "text-blue-500";
-                                if ($isFix) $iconColor = "text-emerald-500";
-                                if ($isDebug) $iconColor = "text-amber-500";
-                                ?>
-                                <a href="<?php echo $dir . '/' . $file; ?>" target="_blank" class="glass-card p-4 rounded-2xl flex items-center gap-4 group">
-                                    <div class="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center transition-colors group-hover:bg-white/10">
-                                        <?php if ($isFix): ?>
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-emerald-500"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
-                                        <?php elseif ($isDebug): ?>
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-amber-500"><path d="M8 2v4"/><path d="M16 2v4"/><path d="M2 12h4"/><path d="M18 12h4"/><path d="M7 7l-2-2"/><path d="M17 7l2-2"/><path d="M7 17l-2 2"/><path d="M17 17l2 2"/><rect width="10" height="14" x="7" y="7" rx="2"/></svg>
-                                        <?php else: ?>
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-blue-500"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-                                        <?php endif; ?>
-                                    </div>
-                                    <div class="flex-1 min-w-0">
-                                        <p class="text-xs font-bold text-gray-200 truncate group-hover:text-white transition-colors">
-                                            <?php echo str_replace(['test-', 'debug-', 'fix-', '.php', '.html'], '', $file); ?>
-                                        </p>
-                                        <p class="text-[9px] font-mono text-gray-600 truncate"><?php echo $file; ?></p>
-                                    </div>
-                                    <div class="opacity-0 group-hover:opacity-100 transition-opacity">
-                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-gray-500"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-                                    </div>
-                                </a>
-                            <?php endforeach; 
-                        endif; ?>
-                    </div>
-                </section>
-            <?php endforeach; ?>
-        </div>
+$html = (string)file_get_contents($shell);
+$json = json_encode(
+    $bootstrap,
+    JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT
+);
 
-        <!-- Footer Info -->
-        <footer class="text-center pb-12">
-            <p class="text-[10px] font-mono text-gray-700 uppercase tracking-widest">
-                LabControl Security & Diagnostics • 2026 Build • Admin Access Restricted
-            </p>
-        </footer>
-    </div>
+$replacement = '<script id="lc-bootstrap" type="application/json">' . ($json === false ? '{}' : $json) . '</script>';
+$needle = '<!--lc:bootstrap-->';
+if (strpos($html, $needle) === false) {
+    $needle = '</head>';
+    $replacement .= '<script>window.__LC_BOOTSTRAP_MISSING_MARKER__=1;</script>';
+}
+$html = str_replace($needle, $needle . "\n    " . $replacement, $html);
 
-</body>
-</html>
+lcTestsSendHeaders('shell');
+echo $html;
+exit;

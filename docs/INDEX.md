@@ -31,6 +31,7 @@ Este diretório contém a documentação técnica e estratégica da plataforma L
 | [**Auditoria da Plataforma**](AUDITORIA_PLATAFORMA.md) | Relatório detalhado de vulnerabilidades e correções aplicadas. |
 | [**Checklist de Deployment**](CHECKLIST_DEPLOYMENT.md) | Verificações obrigatórias antes de subir para produção. |
 | [**Matriz de Testes**](MATRIZ_TESTES.md) | Plano de testes, cobertura de código e QA. |
+| [**Bancada de Testes**](../tests/README.md) | Página `/labcontrol/tests`: portão de acesso, sondagens de ambiente e os 38 utilitários. |
 | [**Relatório de Auditoria**](README_AUDITORIA.md) | Contexto inicial da revisão de segurança realizada. |
 
 ### 3. Readmes de Módulos

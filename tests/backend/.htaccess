@@ -1,0 +1,19 @@
+# Sem URL público — nada nesta pasta é servido diretamente.
+#
+# Os utilitários daqui (e os de root/) correm a partir do painel de testes, que os
+# executa por index.php depois de atravessar o portão de acesso (autenticação +
+# bilhete para os que escrevem). Um pedido direto a
+# /labcontrol/tests/backend/<arquivo> tem de apanhar 403 — sem esta negação
+# bastava conhecere o nome do arquivo para apagar e recriar o admin com a senha
+# de fábrica (backend/debug-password.php).
+#
+# Isto não impede o PHP de incluir estes arquivos: as regras de .htaccess aplicam-se
+# apenas a caminhos HTTP, e é assim que index.php continua a conseguir executá-los.
+
+<IfModule mod_authz_core.c>
+    Require all denied
+</IfModule>
+<IfModule !mod_authz_core.c>
+    Order allow,deny
+    Deny from all
+</IfModule>
