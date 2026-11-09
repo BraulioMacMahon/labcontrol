@@ -3,7 +3,9 @@ const API_CONFIG = {
     // funcionando fora de localhost. Em hospedagem com subpasta diferente, defina
     // window.LABCONTROL_API_BASE_URL no index.html.
     baseURL: (window.LABCONTROL_API_BASE_URL || `${location.origin}/labcontrol/labcontrol-backend/api`),
-    timeout: 15000
+    // WinRM session negotiation can take longer than a normal HTTP call, and
+    // the PHP endpoint waits synchronously for PowerShell to finish.
+    timeout: 60000
 };
 
 class LabControlAPI {

@@ -74,10 +74,10 @@ try {
         
         // Script temporário (nome imprevisível, valores citados de forma segura, autenticação Negotiate)
         $tempScript = createTempPsScript('shutdown', buildRemoteCommandScript(
-            [$host['hostname']],
+            [$host['ip']],
             $credentials['username'],
             $credentials['password'],
-            'shutdown.exe /s /f /t 0'
+            'Stop-Computer -Force'
         ));
         if ($tempScript === null) {
             throw new Exception('Falha ao criar script temporário');
@@ -157,10 +157,10 @@ try {
         
         // Script temporário (nome imprevisível, valores citados de forma segura, autenticação Negotiate)
         $tempScript = createTempPsScript('restart', buildRemoteCommandScript(
-            [$host['hostname']],
+            [$host['ip']],
             $credentials['username'],
             $credentials['password'],
-            'shutdown.exe /r /f /t 0'
+            'Restart-Computer -Force'
         ));
         if ($tempScript === null) {
             throw new Exception('Falha ao criar script temporário');
@@ -383,9 +383,8 @@ try {
             jsonResponse(false, 'Hostname do host contém caracteres inválidos. Corrija o registo do host.', null, 422);
         }
 
-        if (!pingHost($ip)) {
-            jsonResponse(false, 'Host está offline', null, 400);
-        }
+        // A conectividade WinRM é a fonte de verdade. ICMP pode estar bloqueado
+        // mesmo quando TCP/5985 funciona, por isso não bloquear a operação com ping.
 
         // Sem credenciais o WinRM tenta a conta do servidor web e falha sempre.
         // Antes isso chegava ao browser como "500 Falha ao obter processos".
@@ -407,7 +406,7 @@ try {
 
         // Usar aspas simples no PowerShell para evitar expansão de variáveis ($) na senha
         $psContent = 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ' . psQuote($scriptPath) . ' ' .
-                     '-ComputerName ' . psQuote($host['hostname']) . ' ' .
+                     '-ComputerName ' . psQuote($host['ip']) . ' ' .
                      '-Username ' . psQuote($credentials['username']) . ' ' .
                      '-Password ' . psQuote($credentials['password']);
 
@@ -516,11 +515,13 @@ try {
             logError('Hostname inválido recusado em operação remota', ['host_id' => $host['id'], 'action' => $action]);
             jsonResponse(false, 'Hostname do host contém caracteres inválidos. Corrija o registo do host.', null, 422);
         }
-        if (!pingHost($ip)) {
-            jsonResponse(false, 'Host está offline', null, 400);
-        }
-        
+        // Não exigir resposta ICMP: WinRM pode estar acessível com ping bloqueado.
         $credentials = getHostCredentials($host);
+        if (empty($credentials['username']) || empty($credentials['password'])) {
+            jsonResponse(false, 'Credenciais remotas não configuradas para este host.', [
+                'error_type' => 'missing_credentials'
+            ], 412);
+        }
         
         $scriptPath = $powershellPath . 'Kill-Process.ps1';
         
@@ -535,7 +536,7 @@ try {
         
         // Usar aspas simples no PowerShell para evitar expansão de variáveis ($) na senha
         $psContent = 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ' . psQuote($scriptPath) . ' ' .
-                     '-ComputerName ' . psQuote($host['hostname']) . ' ' .
+                     '-ComputerName ' . psQuote($host['ip']) . ' ' .
                      '-Username ' . psQuote($credentials['username']) . ' ' .
                      '-Password ' . psQuote($credentials['password']) . ' ' .
                      $targetParam . ' ' . $forceParam;
@@ -631,17 +632,19 @@ try {
             logError('Hostname inválido recusado em operação remota', ['host_id' => $host['id'], 'action' => $action]);
             jsonResponse(false, 'Hostname do host contém caracteres inválidos. Corrija o registo do host.', null, 422);
         }
-        if (!pingHost($ip)) {
-            jsonResponse(false, 'Host está offline', null, 400);
-        }
-        
+        // Não exigir resposta ICMP: WinRM pode estar acessível com ping bloqueado.
         $credentials = getHostCredentials($host);
+        if (empty($credentials['username']) || empty($credentials['password'])) {
+            jsonResponse(false, 'Credenciais remotas não configuradas para este host.', [
+                'error_type' => 'missing_credentials'
+            ], 412);
+        }
         
         $scriptPath = $powershellPath . 'Execute-Command.ps1';
         
         // Usar aspas simples no PowerShell para evitar expansão de variáveis ($) na senha
         $psContent = 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ' . psQuote($scriptPath) . ' ' .
-                     '-ComputerName ' . psQuote($host['hostname']) . ' ' .
+                     '-ComputerName ' . psQuote($host['ip']) . ' ' .
                      '-Username ' . psQuote($credentials['username']) . ' ' .
                      '-Password ' . psQuote($credentials['password']) . ' ' .
                      '-Command ' . psQuote($command);
@@ -739,19 +742,21 @@ try {
                     'username' => $creds['username'],
                     'password' => $creds['password'],
                     'hostnames' => [],
+                    'targets' => [],
                     'ids' => []
                 ];
             }
             $groups[$key]['hostnames'][] = $host['hostname'];
+            $groups[$key]['targets'][] = $host['ip'];
             $groups[$key]['ids'][] = $host['id'];
         }
 
         foreach ($groups as $group) {
             $tempScript = createTempPsScript('shutdown_bulk', buildRemoteCommandScript(
-                $group['hostnames'],
+                $group['targets'],
                 $group['username'],
                 $group['password'],
-                'shutdown.exe /s /f /t 0'
+                'Stop-Computer -Force'
             ));
             if ($tempScript === null) {
                 $failedCount += count($group['ids']);
@@ -777,24 +782,25 @@ try {
                 continue;
             }
 
-            $failedNames = parseFailedHostsFromOutput($output);
-            if (empty($failedNames)) {
+            $failedTargets = parseFailedHostsFromOutput($output);
+            if (empty($failedTargets)) {
                 // Não foi possível identificar quais falharam → tratar o grupo todo como falhado
-                $failedNames = $group['hostnames'];
+                $failedTargets = $group['targets'];
             }
-            $failedLookup = array_change_key_case(array_flip($failedNames), CASE_LOWER);
+            $failedLookup = array_change_key_case(array_flip($failedTargets), CASE_LOWER);
 
-            foreach ($group['hostnames'] as $index => $name) {
+            foreach ($group['targets'] as $index => $targetIp) {
+                $name = $group['hostnames'][$index];
                 $id = $group['ids'][$index];
-                if (isset($failedLookup[strtolower($name)])) {
+                if (isset($failedLookup[strtolower($targetIp)])) {
                     $failedCount++;
-                    $failedHosts[] = ['hostname' => $name, 'id' => $id, 'reason' => 'falha na execução remota'];
+                    $failedHosts[] = ['hostname' => $name, 'ip' => $targetIp, 'id' => $id, 'reason' => 'falha na execução remota'];
                 } else {
                     $successCount++;
                     $db->updateHostStatus($id, 'offline');
                 }
             }
-            logError('Falha parcial no desligamento em massa', ['failed' => $failedNames, 'output' => array_slice($output, 0, 20)]);
+            logError('Falha parcial no desligamento em massa', ['failed_targets' => $failedTargets, 'output' => array_slice($output, 0, 20)]);
         }
 
         $db->logAction(
@@ -844,31 +850,49 @@ try {
  * Envia pacote Wake-on-LAN
  */
 function sendWOL($macAddress, $ip = null) {
-    $mac = str_replace([':', '-'], '', $macAddress);
-    
-    $packet = sprintf(
-        '%s%s',
-        str_repeat(chr(255), 6),
-        str_repeat(pack('H*', $mac), 16)
-    );
-    
-    if ($ip) {
+    // Use the same .NET UDP flow that was verified manually on the XAMPP
+    // server. This also avoids depending on the optional PHP sockets extension.
+    if ($ip && filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
         $parts = explode('.', $ip);
         $broadcast = $parts[0] . '.' . $parts[1] . '.' . $parts[2] . '.255';
     } else {
         $broadcast = '255.255.255.255';
     }
-    
-    $socket = socket_create(AF_INET, SOCK_DGRAM, SOL_UDP);
-    if (!$socket) {
+
+    $content =
+        '$mac = ' . psQuote($macAddress) . "\r\n" .
+        '$broadcast = ' . psQuote($broadcast) . "\r\n" .
+        '$macBytes = [regex]::Split($mac, \'[:-]\') | ForEach-Object { [Convert]::ToByte($_, 16) }' . "\r\n" .
+        '[byte[]]$packet = ([byte[]](,0xFF * 6)) + ([byte[]]($macBytes * 16))' . "\r\n" .
+        '$udp = $null' . "\r\n" .
+        'try {' . "\r\n" .
+        '    $udp = New-Object System.Net.Sockets.UdpClient' . "\r\n" .
+        '    $udp.EnableBroadcast = $true' . "\r\n" .
+        '    $udp.Connect($broadcast, ' . (int)WOL_PORT . ')' . "\r\n" .
+        '    [void]$udp.Send($packet, $packet.Length)' . "\r\n" .
+        '} catch {' . "\r\n" .
+        '    Write-Error $_.Exception.Message' . "\r\n" .
+        '    exit 1' . "\r\n" .
+        '} finally {' . "\r\n" .
+        '    if ($null -ne $udp) { $udp.Close() }' . "\r\n" .
+        '}' . "\r\n";
+
+    $tempScript = createTempPsScript('wol', $content);
+    if ($tempScript === null) {
+        logError('Falha ao criar script temporário de Wake-on-LAN');
         return false;
     }
-    
-    socket_set_option($socket, SOL_SOCKET, SO_BROADCAST, 1);
-    $result = socket_sendto($socket, $packet, strlen($packet), 0, $broadcast, WOL_PORT);
-    socket_close($socket);
-    
-    return $result !== false;
+
+    $output = [];
+    $returnCode = 0;
+    $command = 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ' . escapeshellarg($tempScript) . ' 2>&1';
+    exec($command, $output, $returnCode);
+    @unlink($tempScript);
+
+    if ($returnCode !== 0) {
+        logError('Falha ao enviar pacote Wake-on-LAN', ['broadcast' => $broadcast, 'output' => array_slice($output, 0, 10)]);
+    }
+    return $returnCode === 0;
 }
 
 /**
