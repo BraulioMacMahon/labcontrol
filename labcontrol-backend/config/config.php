@@ -139,7 +139,9 @@ if (strpos($corsOrigins, '*') !== false && !DEBUG_MODE) {
 
 define('CORS_ALLOWED_ORIGINS', $corsOrigins);
 define('CORS_ALLOWED_METHODS', env('CORS_ALLOWED_METHODS', 'GET, POST, PUT, DELETE, OPTIONS'));
-define('CORS_ALLOWED_HEADERS', env('CORS_ALLOWED_HEADERS', 'Content-Type, Authorization, X-Requested-With'));
+// If-None-Match é usado pelo endpoint de estado (state.php?action=version)
+// para responder 304 sem corpo quando nada mudou.
+define('CORS_ALLOWED_HEADERS', env('CORS_ALLOWED_HEADERS', 'Content-Type, Authorization, X-Requested-With, If-None-Match'));
 
 // =====================================================
 // RATE LIMITING

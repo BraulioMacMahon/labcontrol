@@ -1,9 +1,21 @@
-import { api } from './api-service.js?v=2.1';
+import { api } from './api-service.js?v=3.0';
+import { LabControlRealtime } from './realtime.js?v=3.0';
 
 // Escape HTML para evitar XSS armazenado (ex.: via hostname de host ou nome de processo)
 const lcEscape = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
 }[c]));
+
+// Configuráveis em index.html via window.LABCONTROL_*:
+//  - REALTIME_FALLBACK_MS: intervalo do polling leve quando o SSE falha.
+//  - PROCESS_REFRESH_MS: processos via WinRM são caros; não é "tempo real".
+//  - CHART_SIMULATION: a BD não guarda cpu/ram por host; desligue para um
+//    gráfico estritamente real (plano a 0%) em vez da simulação decorativa.
+const REALTIME_FALLBACK_MS = Number(window.LABCONTROL_REALTIME_FALLBACK_MS || 15000);
+const PROCESS_REFRESH_MS = Number(window.LABCONTROL_PROCESS_REFRESH_MS || 60000);
+// Só usado se o backend ainda não tiver state.php (instalação antiga).
+const LEGACY_INTERVAL_MS = Number(window.LABCONTROL_LEGACY_INTERVAL_MS || 30000);
+const CHART_SIMULATION = window.LABCONTROL_CHART_SIMULATION !== false;
 
 const Components = {
     KPICard: (title, value, icon, colorClass, delay, animate = true) => `
@@ -89,6 +101,17 @@ class LabControlApp {
         this.diagnosticResults = [];
         this.diagnosticsRunning = false;
         this.wolTestRunning = false;
+
+        // Estado do canal de tempo real / diff de dados
+        this.realtime = null;
+        this.processTimer = null;
+        this.legacyTimer = null;
+        this.dataLoaded = false;
+        this.hostsSignature = '';
+        this.logsSignature = '';
+        this.refreshing = false;        // impede refreshes sobrepostos
+        this.pendingChange = null;     // último evento recebido durante um refresh
+        this.forceChecking = false;    // check-all manual em curso
         
         this.attachEventListeners();
         this.init();
@@ -104,14 +127,22 @@ class LabControlApp {
         temp.innerHTML = newHTML;
         
         if (el.innerHTML !== temp.innerHTML) {
+            // Preservar a posição do scroll (ex.: feed de logs / lista de hosts):
+            // reescrever innerHTML sem isto faz o conteúdo "saltar" ao atualizar.
+            const scrollTop = el.scrollTop;
             el.innerHTML = newHTML;
+            el.scrollTop = scrollTop;
         }
     }
 
     async init() {
         await this.enterApp();
-        this.startSyncTimer();
-        this.startNetworkMonitor();
+        this.markUpdated('carga inicial');
+        // Liga o canal push DEPOIS da primeira carga: o `hello` do stream só
+        // notifica alterações ocorridas a partir daqui.
+        this.startRealtime();
+        this.startProcessRefresh();
+        this.startConnectivityEvents();
         
         document.getElementById('host-form')?.addEventListener('submit', (e) => {
             e.preventDefault();
@@ -119,28 +150,176 @@ class LabControlApp {
         });
     }
 
-    startNetworkMonitor() {
-        this.checkAllHosts();
-        setInterval(() => this.checkAllHosts(), 10000);
+    /**
+     * Liga o canal de tempo real (SSE) com fallback de polling leve.
+     * Substitui o antigo `setInterval(checkAllHosts, 10000)`: esse loop fazia
+     * ping a TODOS os hosts dentro do pedido HTTP, empilhava pedidos quando o
+     * PHP demorava e redesenhava a página a cada 10 s — era o "piscar".
+     */
+    startRealtime() {
+        this.realtime = new LabControlRealtime({
+            streamURL: (since) => api.getStateStreamURL(since),
+            fetchVersion: (etag) => api.getStateVersion(etag),
+            fallbackIntervalMs: REALTIME_FALLBACK_MS,
+            onState: (change) => this.applyStateChange(change),
+            onStatus: (status) => this.setRealtimeStatus(status),
+            onUnsupported: () => this.startLegacyMonitor()
+        });
+        this.realtime.start();
     }
 
-    async checkAllHosts() {
-        try {
-            const res = await api.checkAllHosts();
-            if (res && res.success) {
-                await this.loadDashboardData();
-                this.renderSidebar();
-                
-                if (this.currentView === 'dashboard') {
-                    this.renderDashboard(false); // Background update: no animation
-                    this.updateMainChart();
-                } else if (this.currentView === 'host-detail' && this.currentHostId) {
-                    this.updateHostDetailDynamic();
-                }
+    /**
+     * Compatibilidade com backends ainda sem `state.php`: mantém o estado
+     * atualizado, mas a 30 s (não 10 s), com guarda contra pedidos empilhados e
+     * usando o MESMO refresco incremental — portanto também não pisca.
+     * Desaparece assim que o backend for atualizado.
+     */
+    startLegacyMonitor() {
+        if (this.legacyTimer) return;
+        console.warn('state.php não encontrado: monitor de compatibilidade ativo.');
+        this.setRealtimeStatus({
+            mode: 'legacy',
+            detail: 'Atualize o backend para usar SSE (state.php)'
+        });
+        this.legacyTimer = setInterval(async () => {
+            if (document.visibilityState === 'hidden') return;
+            if (this.forceChecking || this.refreshing) return;
+            try {
+                await api.checkAllHosts();
+                await this.applyStateChange({ changed: ['hosts', 'logs'], source: 'legacy' });
+            } catch (error) {
+                console.warn('Verificação de compatibilidade falhou:', error.message);
             }
-        } catch (error) {
-            console.error('Network monitor error:', error);
+        }, LEGACY_INTERVAL_MS);
+    }
+
+    startConnectivityEvents() {
+        window.addEventListener('api:offline', () => {
+            if (this.realtime && !this.realtime.closed) this.realtime.setPauseReason('network', true);
+        });
+        window.addEventListener('api:online', () => {
+            if (this.realtime && !this.realtime.closed) this.realtime.setPauseReason('network', false);
+        });
+    }
+
+    /**
+     * Refresco incremental: pede só o que mudou e toca apenas nos elementos
+     * afetados. Sem navigate(), sem skeleton, sem location.reload().
+     */
+    async applyStateChange(change = {}) {
+        if (this.refreshing) {
+            this.pendingChange = this.mergeChanges(this.pendingChange, change);
+            return;
         }
+        this.refreshing = true;
+        try {
+            const changed = Array.isArray(change.changed) && change.changed.length
+                ? [...new Set(change.changed)]
+                : ['hosts', 'logs'];
+
+            const diff = await this.loadDashboardData({
+                force: true,
+                hosts: changed.includes('hosts'),
+                logs: changed.includes('logs')
+            });
+
+            if (diff.hostsChanged) {
+                this.renderSidebar();
+                this.renderDashboard(false); // sem animação em background
+                this.updateMainChart(false);
+                this.updateHostStatusBadge();
+                // Só abre uma sessão WinRM se o estado do host aberto mudou.
+                if (diff.openHostStatusChanged) this.updateHostDetailDynamic();
+            } else if (diff.logsChanged) {
+                this.renderDashboard(false);
+            }
+
+            if (diff.logsChanged && this.currentView === 'audit') {
+                await this.loadAuditLogs();
+            }
+
+            this.markUpdated(change.source || 'push');
+        } catch (error) {
+            console.error('Atualização em tempo real falhou:', error);
+        } finally {
+            this.refreshing = false;
+            if (this.pendingChange) {
+                const next = this.pendingChange;
+                this.pendingChange = null;
+                this.applyStateChange(next);
+            }
+        }
+    }
+
+    mergeChanges(previous, next) {
+        if (!previous) return next;
+        return {
+            ...next,
+            changed: [...new Set([...(previous.changed || []), ...(next.changed || [])])]
+        };
+    }
+
+    /** Ação manual do botão de sincronização: UM check-all, nunca um loop. */
+    async forceHostCheck() {
+        if (this.forceChecking) return;
+        this.forceChecking = true;
+        const button = document.getElementById('manual-sync');
+        if (button) button.classList.add('animate-spin');
+        try {
+            await api.checkAllHosts();
+            await this.applyStateChange({ changed: ['hosts', 'logs'], source: 'manual' });
+            this.notify('Verificação de hosts concluída', 'success');
+        } catch (error) {
+            this.notify('Falha na verificação: ' + (error.message || 'sem resposta'), 'error');
+        } finally {
+            this.forceChecking = false;
+            if (button) button.classList.remove('animate-spin');
+        }
+    }
+
+    /** Cabeçalho: só muda quando há dados novos (antes havia um timer de 1 s). */
+    markUpdated(reason = '') {
+        const el = document.getElementById('sync-time');
+        if (el) {
+            el.textContent = `SYNC: ${new Date().toLocaleTimeString()}`;
+            el.title = `Última atualização: ${reason || 'tempo real'}`;
+        }
+    }
+
+    setRealtimeStatus({ mode, detail = '' }) {
+        const el = document.getElementById('realtime-status');
+        const dot = document.getElementById('realtime-dot');
+        const styles = {
+            idle:         ['A INICIAR', '#94a3b8'],
+            connecting:   ['A LIGAR', '#fbbf24'],
+            sse:          ['LIVE · SSE', '#4ade80'],
+            reconnecting: ['A RELIGAR', '#fbbf24'],
+            polling:      [`POLL · ${Math.round(REALTIME_FALLBACK_MS / 1000)}s`, '#fbbf24'],
+            paused:       ['PAUSADO', '#94a3b8'],
+            unsupported:  ['LEGACY', '#fbbf24'],
+            legacy:       [`LEGACY · ${Math.round(LEGACY_INTERVAL_MS / 1000)}s`, '#fbbf24'],
+            offline:      ['OFFLINE', '#f87171']
+        };
+        const [label, color] = styles[mode] || styles.idle;
+        if (el) {
+            el.textContent = label;
+            el.style.color = color;
+            el.title = detail || 'Canal de atualizações em tempo real';
+        }
+        if (dot) dot.style.backgroundColor = color;
+    }
+
+    /**
+     * Processos remotos (WinRM) são caros: ficam num timer próprio e bem mais
+     * espaçado, apenas com a aba visível e a vista de detalhe aberta.
+     */
+    startProcessRefresh() {
+        if (this.processTimer) clearInterval(this.processTimer);
+        this.processTimer = setInterval(() => {
+            if (document.visibilityState === 'hidden') return;
+            if (this.currentView !== 'host-detail' || !this.currentHostId) return;
+            this.updateHostDetailDynamic();
+        }, PROCESS_REFRESH_MS);
     }
 
     async enterApp() {
@@ -150,11 +329,23 @@ class LabControlApp {
         await this.navigate('dashboard');
     }
 
-    async loadDashboardData() {
+    /**
+     * Carrega hosts e/ou logs e devolve o que mudou de facto.
+     * As assinaturas evitam re-render quando o SSE dispara mas os dados são
+     * iguais (ex.: dois eventos seguidos, ou `hello` após reconexão).
+     * `force: false` + `dataLoaded` evita o duplo pedido enterApp -> navigate.
+     */
+    async loadDashboardData({ force = false, hosts: withHosts = true, logs: withLogs = true } = {}) {
+        const diff = { hostsChanged: false, logsChanged: false, openHostStatusChanged: false };
+        if (!force && this.dataLoaded) return diff;
+        if (!withHosts && !withLogs) return diff;
+
+        const previousOpenStatus = this.hosts.find(h => h.id === this.currentHostId)?.status;
+
         try {
             const [hostsRes, logsRes] = await Promise.all([
-                api.getHosts(),
-                api.getLogs({ limit: 8 })
+                withHosts ? api.getHosts() : Promise.resolve(null),
+                withLogs ? api.getLogs({ limit: 8 }) : Promise.resolve(null)
             ]);
 
             if (hostsRes && hostsRes.success) {
@@ -170,6 +361,18 @@ class LabControlApp {
                     ram: h.memory_usage || 0,
                     is_active: h.is_active ?? 1
                 }));
+
+                const signature = JSON.stringify([
+                    this.hosts.map(h => [h.id, h.name, h.ip, h.status, h.mac, h.cpu, h.ram, h.is_active]),
+                    this.clusterStats
+                ]);
+                diff.hostsChanged = signature !== this.hostsSignature;
+                this.hostsSignature = signature;
+
+                const newOpenStatus = this.hosts.find(h => h.id === this.currentHostId)?.status;
+                diff.openHostStatusChanged = Boolean(
+                    previousOpenStatus && newOpenStatus && previousOpenStatus !== newOpenStatus
+                );
             }
 
             if (logsRes && logsRes.success) {
@@ -181,10 +384,19 @@ class LabControlApp {
                     time: l.timestamp ? new Date(l.timestamp).toLocaleTimeString() : '--:--',
                     status: l.status || 'success'
                 }));
+
+                const signature = JSON.stringify(this.logs);
+                diff.logsChanged = signature !== this.logsSignature;
+                this.logsSignature = signature;
+            }
+
+            if ((hostsRes && hostsRes.success) || (logsRes && logsRes.success)) {
+                this.dataLoaded = true;
             }
         } catch (error) {
             console.error('Load error:', error);
         }
+        return diff;
     }
 
     renderSidebar() {
@@ -195,28 +407,32 @@ class LabControlApp {
         const skeleton = document.getElementById('skeleton-loader');
         const views = document.querySelectorAll('.page-view');
         const navLinks = document.querySelectorAll('.nav-link');
-        const viewTitle = document.getElementById('view-title');
 
         document.getElementById('sidebar')?.classList.add('-translate-x-full');
         document.getElementById('sidebar-overlay')?.classList.add('hidden');
 
-        // Só mostra o skeleton se não for uma atualização automática
-        if (skeleton && !params.silent) {
+        const target = document.getElementById(`view-${viewId === 'host-detail' ? 'host-detail' : viewId}`);
+        if (!target) return;
+
+        // O skeleton só aparece no PRIMEIRO carregamento. Depois disso os dados
+        // já estão em memória e são mantidos pelo SSE: esconder todas as views
+        // a cada navegação era outra fonte do "piscar" da página.
+        const showSkeleton = !params.silent && !this.dataLoaded;
+        if (skeleton && showSkeleton) {
             skeleton.innerHTML = Components.Skeleton();
             skeleton.classList.remove('hidden');
-            views.forEach(v => v.classList.add('hidden', 'opacity-0'));
         }
-        
-        await new Promise(r => setTimeout(r, 150));
+        views.forEach(v => {
+            if (v !== target) v.classList.add('hidden', 'opacity-0');
+        });
+
+        await new Promise(r => setTimeout(r, showSkeleton ? 150 : 40));
 
         navLinks.forEach(link => {
             const isTarget = link.dataset.nav === viewId || (viewId === 'host-detail' && link.dataset.id === params.id);
             if (isTarget) link.classList.add('active-nav');
             else link.classList.remove('active-nav');
         });
-
-        const target = document.getElementById(`view-${viewId === 'host-detail' ? 'host-detail' : viewId}`);
-        if (!target) return;
 
         if (!params.silent) {
             target.classList.remove('hidden');
@@ -244,8 +460,11 @@ class LabControlApp {
                 case 'dashboard':
                     if (viewTitle) viewTitle.innerText = 'Dashboard';
                     await this.loadDashboardData();
-                    this.renderDashboard(true); // Navigation render: animate
-                    // Delay para garantir que o canvas esteja no DOM após animação
+                    // Sem fade-in-up nos cartões: a transição da própria view já
+                    // dá feedback, e reanimar KPIs a cada navegação parecia um
+                    // "refresh" da página.
+                    this.renderDashboard(false);
+                    // Delay para garantir que o canvas esteja no DOM
                     setTimeout(() => this.initMainChart(), 100);
                     break;
                 case 'audit':
@@ -455,7 +674,7 @@ class LabControlApp {
         }
     }
 
-    renderDashboard(animate = true) {
+    renderDashboard(animate = false) {
         const onlineCount = parseInt(this.clusterStats?.online_count || this.hosts.filter(h => h.status === 'online').length);
         const offlineCount = parseInt(this.clusterStats?.offline_count || this.hosts.filter(h => h.status === 'offline').length);
         const avgCpu = parseFloat(this.clusterStats?.avg_cpu || 0);
@@ -514,6 +733,36 @@ class LabControlApp {
         } catch (e) { this.notify('Erro ao carregar logs', 'error'); }
     }
 
+    /** Botões do detalhe: re-renderizáveis isoladamente quando o status muda. */
+    renderHostActions(host) {
+        return `
+            <button data-action="edit-host" data-id="${host.id}" class="w-12 h-12 glass-card rounded-2xl flex items-center justify-center text-blue-400 hover:bg-blue-500/10 transition-all"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="pointer-events-none"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg></button>
+            ${host.status !== 'online' ? `
+                <button data-action="wol-host" data-ip="${host.ip}" data-mac="${host.mac}" class="w-12 h-12 glass-card rounded-2xl flex items-center justify-center text-green-500 hover:bg-green-500/10 transition-all" title="Ligar Host"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="pointer-events-none"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg></button>
+            ` : ''}
+            <button data-action="restart-host" data-hostname="${lcEscape(host.name)}" class="w-12 h-12 glass-card rounded-2xl flex items-center justify-center text-amber-500 hover:bg-amber-500/10 transition-all"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="pointer-events-none"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></svg></button>
+            <button data-action="shutdown-host" data-hostname="${lcEscape(host.name)}" class="w-12 h-12 glass-card rounded-2xl flex items-center justify-center text-red-500 hover:bg-red-500/10 transition-all"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="pointer-events-none"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" x2="12" y1="2" y2="12"/></svg></button>
+        `;
+    }
+
+    /**
+     * Patch do badge/ações do host aberto SEM reconstruir a vista inteira
+     * (o terminal PowerShell guarda histórico e não pode ser apagado).
+     */
+    updateHostStatusBadge() {
+        if (this.currentView !== 'host-detail' || !this.currentHostId) return;
+        const host = this.hosts.find(h => h.id === this.currentHostId);
+        if (!host) return;
+
+        const dot = document.getElementById('host-status-dot');
+        const text = document.getElementById('host-status-text');
+        if (dot) dot.className = `w-2 h-2 rounded-full ${host.status === 'online' ? 'bg-green-400 animate-pulse' : 'bg-gray-500'}`;
+        if (text) text.textContent = String(host.status).toUpperCase();
+        if (document.getElementById('host-actions')) {
+            this.safeUpdateHTML('host-actions', this.renderHostActions(host));
+        }
+    }
+
     async loadHostDetail(id) {
         this.currentHostId = id;
         const host = this.hosts.find(h => h.id === id);
@@ -543,9 +792,9 @@ class LabControlApp {
                     <div>
                         <div class="flex items-center gap-3 mb-3">
                             <span class="px-3 py-1 rounded-lg bg-blue-500/10 text-blue-400 text-[10px] font-black uppercase tracking-tighter border border-blue-500/20">WinRM</span>
-                            <div class="flex items-center gap-2 px-3 py-1 rounded-lg bg-white/5 border border-white/5">
-                                <span class="w-2 h-2 rounded-full ${host.status === 'online' ? 'bg-green-400 animate-pulse' : 'bg-gray-500'}"></span>
-                                <span class="text-[10px] font-bold text-gray-400 uppercase">${host.status}</span>
+                            <div id="host-status-badge" class="flex items-center gap-2 px-3 py-1 rounded-lg bg-white/5 border border-white/5">
+                                <span id="host-status-dot" class="w-2 h-2 rounded-full ${host.status === 'online' ? 'bg-green-400 animate-pulse' : 'bg-gray-500'}"></span>
+                                <span id="host-status-text" class="text-[10px] font-bold text-gray-400 uppercase">${host.status}</span>
                             </div>
                         </div>
                         <h1 class="text-4xl font-extrabold tracking-tight text-white mb-2">${lcEscape(host.name)}</h1>
@@ -554,20 +803,13 @@ class LabControlApp {
                             <span class="font-mono">${host.mac || 'No MAC'}</span>
                         </div>
                     </div>
-                    <div class="flex gap-3">
-                        <button data-action="edit-host" data-id="${host.id}" class="w-12 h-12 glass-card rounded-2xl flex items-center justify-center text-blue-400 hover:bg-blue-500/10 transition-all"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="pointer-events-none"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg></button>
-                        ${host.status !== 'online' ? `
-                            <button data-action="wol-host" data-ip="${host.ip}" data-mac="${host.mac}" class="w-12 h-12 glass-card rounded-2xl flex items-center justify-center text-green-500 hover:bg-green-500/10 transition-all" title="Ligar Host"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="pointer-events-none"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg></button>
-                        ` : ''}
-                        <button data-action="restart-host" data-hostname="${host.name}" class="w-12 h-12 glass-card rounded-2xl flex items-center justify-center text-amber-500 hover:bg-amber-500/10 transition-all"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="pointer-events-none"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></svg></button>
-                        <button data-action="shutdown-host" data-hostname="${host.name}" class="w-12 h-12 glass-card rounded-2xl flex items-center justify-center text-red-500 hover:bg-red-500/10 transition-all"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="pointer-events-none"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" x2="12" y1="2" y2="12"/></svg></button>
-                    </div>
+                    <div class="flex gap-3" id="host-actions">${this.renderHostActions(host)}</div>
                 </div>
                 <div class="grid grid-cols-1 xl:grid-cols-2 gap-8">
                     <div class="glass-panel rounded-[2rem] overflow-hidden flex flex-col h-[500px]">
                         <div class="px-8 py-6 border-b border-white/5 bg-white/[0.01] flex justify-between items-center">
                             <h3 class="font-bold text-sm text-white">Gerenciador de Processos</h3>
-                            <span class="text-[10px] text-gray-500 font-mono">TOTAL: ${processes.length}</span>
+                            <span class="text-[10px] text-gray-500 font-mono">TOTAL: <span id="process-total">${processes.length}</span></span>
                         </div>
                         <div class="overflow-y-auto flex-1 custom-scrollbar" id="process-table-container">
                             ${this.renderProcessTable(host, processes, this.processError)}
@@ -659,8 +901,8 @@ class LabControlApp {
         if (this.currentView !== 'host-detail' || !this.currentHostId) return;
         const host = this.hosts.find(h => h.id === this.currentHostId);
         if (!host || host.status !== 'online') return;
-        // O monitor corre a cada 10 s: não abrir outra sessão WinRM enquanto a
-        // anterior ainda está a responder.
+        // Eventos SSE + timer de PROCESS_REFRESH_MS podem coincidir: não abrir
+        // outra sessão WinRM enquanto a anterior ainda está a responder.
         if (this.processesLoading) return;
         this.processesLoading = true;
 
@@ -679,12 +921,14 @@ class LabControlApp {
             this.processesLoading = false;
         }
 
-        // Só escrever na consola quando o erro muda, em vez de a cada 10 s.
+        // Só escrever na consola quando o erro muda, em vez de em cada consulta.
         if (error && error !== this.processError) {
             console.warn('Processos indisponíveis em ' + host.name + ':', error);
         }
         this.processError = error;
         this.safeUpdateHTML('process-table-container', this.renderProcessTable(host, processes, error));
+        const total = document.getElementById('process-total');
+        if (total) total.textContent = String(this.normalizeProcesses(processes).length);
     }
 
     async handleKillProcess(hostname, pid, processName) {
@@ -738,8 +982,8 @@ class LabControlApp {
                 if (res.data.failed_count > 0) {
                     this.notify(`⚠️ Falha em ${res.data.failed_count} hosts`, 'warning');
                 }
-                await this.loadDashboardData();
-                this.renderDashboard();
+                await this.loadDashboardData({ force: true });
+                this.renderDashboard(false);
                 this.renderSidebar();
             } else {
                 this.notify('❌ Falha: ' + res.message, 'error');
@@ -882,14 +1126,17 @@ class LabControlApp {
         });
     }
 
-    updateMainChart() {
+    updateMainChart(animate = false) {
         if (!this.charts.main) return;
 
         let cpuVal = parseFloat(this.clusterStats?.avg_cpu || 0);
         let ramVal = parseFloat(this.clusterStats?.avg_mem || 0);
         
-        // Simulação inteligente se dados reais estiverem zerados (ex: sistema recém ligado)
-        if (cpuVal === 0 && ramVal === 0) {
+        // A view v_host_stats não fornece avg_cpu/avg_mem. A simulação antiga
+        // corria a cada 10 s e animava o gráfico mesmo sem dados novos — outra
+        // fonte de "piscar". Agora só corre em mudanças reais de estado e pode
+        // ser desligada com window.LABCONTROL_CHART_SIMULATION = false.
+        if (CHART_SIMULATION && cpuVal === 0 && ramVal === 0) {
             const onlineCount = this.hosts.filter(h => h.status === 'online').length;
             const total = this.hosts.length || 1;
             const activityBase = (onlineCount / total) * 30;
@@ -909,12 +1156,20 @@ class LabControlApp {
             chart.data.datasets.forEach(d => d.data.shift());
         }
 
-        chart.update('active'); 
+        // 'none' = redesenho sem animação; não há flash a cada atualização.
+        chart.update(animate ? 'active' : 'none');
     }
 
     attachEventListeners() {
         document.addEventListener('click', (e) => {
             const target = e.target;
+
+            // Verificação manual (um único check-all, a pedido do operador).
+            if (target.closest('#manual-sync')) {
+                this.forceHostCheck();
+                return;
+            }
+
             const navBtn = target.closest('[data-nav]');
             if (navBtn) {
                 const view = navBtn.dataset.nav;
@@ -945,8 +1200,6 @@ class LabControlApp {
             if (target.closest('#wol-all-btn')) this.handleWakeOnLanAll();
         });
     }
-
-    startSyncTimer() { setInterval(() => { const el = document.getElementById('sync-time'); if (el) el.innerText = `SYNC: ${new Date().toLocaleTimeString()}`; }, 1000); }
 
     showHostModal(id = null) {
         const modal = document.getElementById('host-modal');
@@ -1046,7 +1299,7 @@ class LabControlApp {
 
             this.notify(id ? 'Host atualizado' : 'Host registado', 'success');
             this.hideHostModal();
-            await this.loadDashboardData();
+            await this.loadDashboardData({ force: true });
             this.renderSidebar();
             if (id && this.currentView === 'host-detail' && this.currentHostId === id) {
                 await this.loadHostDetail(id);
@@ -1070,7 +1323,7 @@ class LabControlApp {
             this.notify('Host removido', 'success');
             this.hideHostModal();
             if (this.currentHostId === id) this.currentHostId = null;
-            await this.loadDashboardData();
+            await this.loadDashboardData({ force: true });
             this.renderSidebar();
             await this.navigate('dashboard');
         } catch (e) {

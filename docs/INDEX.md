@@ -17,6 +17,7 @@ Este diretório contém a documentação técnica e estratégica da plataforma L
 | [**Funcionamento no Laboratório**](../GUIA_FUNCIONAMENTO_LABORATORIO.md) | Guia atual sem login: instalação, hosts, WinRM, WOL, arranque e diagnóstico. |
 | [**Banco de Dados**](DOCUMENTACAO_BANCO_DE_DADOS.md) | Modelo ER, tabelas, campos e queries SQL. |
 | [**API & Endpoints**](DOCUMENTACAO_API.md) | Documentação das rotas RESTful, parâmetros e respostas. |
+| [**Tempo Real / SSE**](DOCUMENTACAO_TEMPO_REAL.md) | ⭐ Fim do polling e do piscar: `state.php`, `realtime.js`, configuração, troubleshooting e quando usar WebSocket. |
 | [**Operações Remotas**](DOCUMENTACAO_OPERACOES_REMOTAS.md) | Detalhes sobre scripts PowerShell e integração WinRM. |
 | [**Frontend & UI**](DOCUMENTACAO_FRONTEND.md) | Estrutura da interface, componentes Tailwind CSS e lógica JS. |
 | [**Manutenção**](DOCUMENTACAO_MANUTENCAO.md) | Guia para atualizações, backups e evolução do sistema. |

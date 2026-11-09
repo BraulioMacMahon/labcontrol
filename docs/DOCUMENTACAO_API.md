@@ -1,7 +1,7 @@
 # Documentação da API - LabControl
 
 ## 1. Visão Geral
-A API do LabControl é uma interface RESTful baseada em PHP que fornece endpoints para gerenciamento de hosts, execução de comandos remotos e visualização de logs. Todas as respostas são retornadas no formato **JSON** (exceto exportações CSV).
+A API do LabControl é uma interface RESTful baseada em PHP que fornece endpoints para gerenciamento de hosts, execução de comandos remotos, visualização de logs e um canal **SSE** de atualizações em tempo real. As respostas são **JSON** (exceto exportações CSV e `state.php?action=stream`, que é `text/event-stream`).
 
 ### Base URL
 `http://seu-servidor/labcontrol/labcontrol-backend/api/`
@@ -43,6 +43,57 @@ Este modo destina-se exclusivamente à rede interna autorizada do laboratório. 
 | `list` | GET | Retorna o histórico de ações realizadas no sistema. |
 | `search` | GET | Filtra logs por período, host ou usuário. |
 | `export` | GET | Exporta os logs em formato compatível com planilhas. |
+
+### 3.4. Estado em tempo real (`state.php`) — **SSE**
+
+Substitui o polling de `hosts.php?action=check-all` no browser. Ambos os modos são **GET**, de leitura apenas, e executam **uma única consulta** ao MySQL. Ver detalhes em [**Documentação de Tempo Real**](DOCUMENTACAO_TEMPO_REAL.md).
+
+| Ação | Método | Content-Type | Descrição |
+| :--- | :--- | :--- | :--- |
+| `version` | GET | `application/json` | Fingerprint do estado. Suporta `If-None-Match` → `304` sem corpo. |
+| `stream` | GET | `text/event-stream` | Ligação SSE persistente; emite `hello`, `state`, `bye`. |
+
+Fingerprint: `hosts_rev = UNIX_TIMESTAMP(MAX(hosts.updated_at)) + COUNT(hosts)` e `logs_rev = MAX(logs.id) + COUNT(logs)`; `version = md5(hosts_rev|logs_rev)`. Qualquer escrita (status, CRUD, log de auditoria) o altera.
+
+**Resposta `action=version`:**
+```json
+{
+  "success": true,
+  "message": "Versão do estado",
+  "timestamp": "2026-11-09 10:15:00",
+  "data": {
+    "version": "9f2c...",
+    "hosts_rev": "1762683300-24",
+    "logs_rev": "812-812",
+    "degraded": false,
+    "server_time": "2026-11-09T10:15:00+01:00",
+    "stream": "state.php?action=stream"
+  }
+}
+```
+
+**Stream (`curl -N` para ver os eventos em tempo real):**
+```bash
+curl -N "http://localhost/labcontrol/labcontrol-backend/api/state.php?action=stream"
+```
+```
+retry: 3000
+
+event: hello
+data: {"version":"9f2c...","hosts_rev":"1762683300-24","logs_rev":"812-812","poll_interval":2,"max_duration":120}
+
+event: state
+data: {"version":"ab41...","hosts_rev":"1762683312-24","logs_rev":"812-812"}
+
+: keep-alive
+
+event: bye
+data: {"reason":"max_duration"}
+```
+
+`bye` é emitido ao fim de `SSE_MAX_DURATION` segundos para libertar o worker Apache; o `EventSource` reconecta de imediato. Configuração em `.env`: `SSE_POLL_INTERVAL`, `SSE_HEARTBEAT`, `SSE_MAX_DURATION`, `SSE_RETRY_MS`.
+
+> **Não use `check-all` em loops.** Esse endpoint faz ping sequencial a todos os hosts dentro do pedido HTTP. Está reservado à verificação manual do operador; o estado corrente vem do `sync-service` + `state.php`.
 
 ---
 

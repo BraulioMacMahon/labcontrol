@@ -68,8 +68,10 @@ Cada execução remota gera um registro na tabela `logs` com os seguintes detalh
 GET .../api/control.php?action=processes&hostname=LAB17-PC33 → 500 (Internal Server Error)
 Erro: Falha ao obter processos
 ```
-Repetido a cada 10 s porque o `startNetworkMonitor()` do frontend atualiza o painel de processos
-em cada ciclo de `checkAllHosts()`.
+Antes repetido a cada 10 s pelo `startNetworkMonitor()` do frontend. Hoje o painel só volta a
+consultar processos quando o estado do host muda (evento SSE) ou no timer separado de
+`LABCONTROL_PROCESS_REFRESH_MS` (60 s por omissão), com a aba visível e a vista de detalhe aberta —
+sem sessões WinRM sobrepostas. Ver [**Documentação de Tempo Real**](DOCUMENTACAO_TEMPO_REAL.md).
 
 O `ping` responde (o host aparece *online*), mas o WinRM falha. Historicamente **qualquer**
 falha nessa fase era convertida num `500` sem detalhe, e `Get-Processes.ps1` não emitia os

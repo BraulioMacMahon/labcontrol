@@ -4,7 +4,8 @@
   "description": "Sync service: polls hosts, updates status and last_seen in MySQL, syncs with Firebase",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "test": "node --test ../tests/sync-service/*.test.mjs"
   },
   "dependencies": {
     "dotenv": "^16.0.0",

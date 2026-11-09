@@ -71,6 +71,30 @@ RewriteRule ^security-notifications\.php$ - [F,L]
 </FilesMatch>
 
 # =====================================================
+# SSE (state.php?action=stream)
+# =====================================================
+# Um stream SSE só funciona se a resposta chegar ao browser em pedaços.
+# Comprimir ou fazer buffer de text/event-stream faria o EventSource parecer
+# "morto" (o frontend cairia para polling). Estas regras aplicam-se apenas a
+# este tipo de conteúdo; o resto da API continua comprimido normalmente.
+# `no-gzip` é respeitado pelo mod_deflate e por muitos proxies. Aplica-se ao
+# FICHEIRO (SetEnvIf sobre Content-Type casaria com o cabeçalho do pedido, que
+# num GET não existe — e não com a resposta text/event-stream).
+<Files "state.php">
+    <IfModule mod_env.c>
+        SetEnv no-gzip 1
+        SetEnv dont-vary 1
+    </IfModule>
+
+    # Em mod_php, desligar o output buffering para o endpoint de stream.
+    <IfModule mod_php.c>
+        php_value output_buffering off
+        php_value zlib.output_compression off
+        php_value max_execution_time 0
+    </IfModule>
+</Files>
+
+# =====================================================
 # COMPRESSÃO GZIP
 # =====================================================
 
