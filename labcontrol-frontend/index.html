@@ -184,6 +184,10 @@
                                     <span id="sync-time" class="text-[10px] text-gray-500 font-bold font-mono tracking-widest uppercase">SYNC: --:--</span>
                                 </div>
                                 <div class="flex items-center gap-2">
+                                    <span id="realtime-dot" class="w-1.5 h-1.5 rounded-full" style="background-color:#94a3b8"></span>
+                                    <span id="realtime-status" class="text-[10px] font-bold font-mono tracking-widest uppercase" style="color:#94a3b8">A INICIAR</span>
+                                </div>
+                                <div class="flex items-center gap-2">
                                     <span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>
                                     <span class="text-[10px] text-green-500/80 font-bold font-mono tracking-widest uppercase">MODO LABORATÓRIO</span>
                                 </div>
@@ -210,7 +214,7 @@
                     </div>
 
                     <div class="flex items-center gap-4 lg:gap-6 border-l border-white/10 pl-6 lg:pl-10">
-                        <button id="manual-sync" class="w-10 h-10 flex items-center justify-center rounded-xl bg-white/5 hover:bg-white/10 text-gray-400 hover:text-blue-400 transition-all border border-white/5" title="Manual Sync">
+                        <button id="manual-sync" class="w-10 h-10 flex items-center justify-center rounded-xl bg-white/5 hover:bg-white/10 text-gray-400 hover:text-blue-400 transition-all border border-white/5" title="Verificar hosts agora (operação manual; o estado normal chega por SSE)">
                             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></svg>
                         </button>
                         <button id="wol-all-btn" class="w-10 h-10 flex items-center justify-center rounded-xl bg-green-500/10 hover:bg-green-500/20 text-green-400 hover:text-green-300 transition-all border border-green-500/20" title="Wake All Offline Hosts">
@@ -343,6 +347,13 @@
     </div>
 
     <script src="vendor/chart.js"></script>
-    <script type="module" src="app.js?v=2.1"></script>
+    <script>
+        // Afinações opcionais do canal de tempo real (valores por omissão):
+        // window.LABCONTROL_REALTIME_FALLBACK_MS = 15000; // polling leve se o SSE falhar
+        // window.LABCONTROL_PROCESS_REFRESH_MS  = 60000; // WinRM é caro: não é "push"
+        // window.LABCONTROL_LEGACY_INTERVAL_MS  = 30000; // só se o backend não tiver state.php
+        // window.LABCONTROL_CHART_SIMULATION    = true;  // gráfico decorativo cpu/ram
+    </script>
+    <script type="module" src="app.js?v=3.0"></script>
 </body>
 </html>

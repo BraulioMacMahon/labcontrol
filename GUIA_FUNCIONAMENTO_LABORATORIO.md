@@ -156,7 +156,7 @@ Uma resposta válida contém `"success": true` e **não** devolve HTTP 401 por f
    - **Network Address (IP)**: o IPv4 atual/reservado da estação.
    - **Physical Address (MAC)**: necessário para Wake-on-LAN, no formato `AA:BB:CC:DD:EE:FF`.
 3. Clique em **Confirm & Register Host**.
-4. Aguarde alguns segundos: o painel verifica o estado por ping a cada 10 segundos.
+4. O estado é atualizado **por push** (SSE `state.php`) assim que o `sync-service` deteta uma alteração — não é necessário recarregar a página. O ping em todos os hosts só corre quando clica no botão de sincronização manual; o serviço Node faz a verificação periódica (`SYNC_INTERVAL`, 60 s por omissão).
 5. Para editar nome, IP ou MAC, abra o host e clique no lápis.
 6. Para remover um host, abra o mesmo painel de edição e use **Remove Host from System**.
 

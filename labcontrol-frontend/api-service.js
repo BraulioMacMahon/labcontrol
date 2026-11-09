@@ -1,11 +1,13 @@
-const API_CONFIG = {
+export const API_CONFIG = {
     // Base URL da API. Usa location.origin para herdar protocolo (HTTP/HTTPS) e host,
     // funcionando fora de localhost. Em hospedagem com subpasta diferente, defina
     // window.LABCONTROL_API_BASE_URL no index.html.
     baseURL: (window.LABCONTROL_API_BASE_URL || `${location.origin}/labcontrol/labcontrol-backend/api`),
     // WinRM session negotiation can take longer than a normal HTTP call, and
     // the PHP endpoint waits synchronously for PowerShell to finish.
-    timeout: 60000
+    timeout: 60000,
+    // Consulta de estado: pedido leve, não deve ficar preso como um WinRM.
+    stateTimeout: 10000
 };
 
 class LabControlAPI {
@@ -79,8 +81,60 @@ class LabControlAPI {
         return this.request('hosts.php?action=list', { method: 'GET' });
     }
 
+    /**
+     * Verificação por ping de TODOS os hosts. É uma operação pesada e síncrona
+     * no PHP (um pedido por máquina, com timeout). Reservada para a ação manual
+     * do operador — NUNCA usar num loop automático. O estado em tempo real vem
+     * do sync-service + state.php (SSE).
+     */
     async checkAllHosts() {
         return this.request('hosts.php?action=check-all', { method: 'GET' });
+    }
+
+    /** URL do stream SSE de estado. */
+    getStateStreamURL(since = '') {
+        const base = `${API_CONFIG.baseURL}/state.php?action=stream`;
+        return since ? `${base}&since=${encodeURIComponent(since)}` : base;
+    }
+
+    /**
+     * Fingerprint do estado (1 query leve). Usado para semear o cliente no
+     * arranque e como fallback quando o SSE não está disponível.
+     * Com ETag/If-None-Match o servidor responde 304 sem corpo quando nada mudou.
+     */
+    async getStateVersion(etag = null) {
+        const url = `${API_CONFIG.baseURL}/state.php?action=version`;
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), API_CONFIG.stateTimeout);
+        const headers = { 'Accept': 'application/json' };
+        if (etag) headers['If-None-Match'] = etag;
+
+        try {
+            const response = await fetch(url, {
+                method: 'GET',
+                headers,
+                cache: 'no-store',
+                signal: controller.signal
+            });
+
+            if (response.status === 304) return { unchanged: true, etag };
+
+            if (!response.ok) {
+                const error = new Error(`Erro ${response.status} ao consultar o estado`);
+                error.status = response.status; // 404/405 => backend sem state.php
+                throw error;
+            }
+            const body = await response.json();
+            const data = body?.data || null;
+            return {
+                unchanged: false,
+                success: body?.success !== false,
+                etag: response.headers.get('ETag') || (data?.version ? `"${data.version}"` : null),
+                data
+            };
+        } finally {
+            clearTimeout(timeoutId);
+        }
     }
 
     async getHostStats() {

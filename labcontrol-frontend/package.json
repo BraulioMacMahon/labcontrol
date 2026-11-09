@@ -1,0 +1,10 @@
+{
+  "name": "labcontrol-frontend",
+  "version": "3.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Frontend LabControl (ES modules puros, sem build). Actualizado por SSE.",
+  "scripts": {
+    "test": "node --test ../tests/frontend/*.test.mjs"
+  }
+}

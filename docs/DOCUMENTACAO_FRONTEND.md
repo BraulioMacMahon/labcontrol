@@ -8,6 +8,8 @@ O frontend do LabControl é uma **Single Page Application (SPA)** construída co
 *   `index.html`: Ponto de entrada único. Contém a estrutura base (layout), as "views" principais e o container para componentes dinâmicos.
 *   `app.js`: O "cérebro" da aplicação. Gerencia o estado (state), rotas internas, monitoramento de rede e renderização de componentes.
 *   `api-service.js`: Camada de comunicação com o backend PHP, timeouts e tratamento de erros. Não utiliza tokens nem dados de sessão.
+*   `realtime.js`: Cliente **Server-Sent Events** (`EventSource`) com reconexão, pausa em abas ocultas e fallback para polling leve. Não toca no DOM: comunica por callbacks `onState` / `onStatus`.
+*   `package.json`: Marca o diretório como ES modules e expõe `npm test` (testes de `realtime.js` em `tests/frontend/`).
 *   `vendor/`: Contém bibliotecas e ativos locais para funcionamento offline:
     *   `output.css`: Arquivo compilado do Tailwind CSS.
     *   `chart.js`: Biblioteca para gráficos de performance.
@@ -34,11 +36,33 @@ Além das classes padrão, foram criadas classes de design "Glassmorphism":
 
 ## 4. Fluxo de Interação e Monitoramento
 
-### 4.1. Monitoramento de Rede (Network Monitor)
-O `app.js` inicia um loop de monitoramento automático (`startNetworkMonitor`) que executa a cada 10 segundos:
-1.  Chama `api.checkAllHosts()`.
-2.  O backend faz o ping em todas as máquinas.
-3.  O frontend recebe o status atualizado e re-renderiza apenas as partes necessárias (Dashboard ou Detalhes do Host) sem recarregar a página.
+### 4.1. Atualizações em tempo real (SSE, sem recarregar)
+O loop antigo (`startNetworkMonitor` → `checkAllHosts()` a cada 10 s) foi **removido**. Ele fazia ping a todas as máquinas dentro de um pedido HTTP, empilhava pedidos quando o PHP demorava, redesenhava Dashboard + sidebar + gráfico e abria uma sessão WinRM por ciclo — era a origem do "carregamento" constante e do piscar da página.
+
+Modelo atual:
+
+```
+sync-service (Node, SYNC_INTERVAL)  ──UPDATE hosts──>  MySQL
+API / comandos do operador          ──INSERT logs───>  MySQL
+                                                         │
+                          state.php lê 1 fingerprint leve │ (2 s)
+                                                         ▼
+        state.php?action=stream  ──event: state──>  realtime.js (EventSource)
+                                                         │ onState({changed})
+                                                         ▼
+        app.js.applyStateChange() → getHosts()/getLogs() → safeUpdateHTML()
+                                   → só os nós que mudaram
+```
+
+1. **`state.php?action=version`** dá o fingerprint inicial (`version`, `hosts_rev`, `logs_rev`) com suporte a `ETag`/`304`.
+2. **`state.php?action=stream`** mantém a ligação aberta e emite `hello`, `state` (só quando o fingerprint muda), `bye` e keep-alives. `EventSource` reconecta sozinho.
+3. **`applyStateChange()`** pede **apenas** o grupo alterado e compara assinaturas antes de escrever no DOM. Sem `navigate()`, sem skeleton, sem `location.reload()`.
+4. **Fallback**: se o SSE não abrir (proxy com buffering, browser antigo), passa a um polling de 15 s contra `action=version` (1 query, 304 quando nada mudou) e volta a tentar SSE a cada 60 s. Nunca volta a `check-all`. Se o backend ainda não tiver `state.php` (404), entra em **modo de compatibilidade**: `check-all` a 30 s com guarda de concorrência e o mesmo refresco incremental — funcional e sem piscar até o backend ser atualizado.
+5. **Indicador** `LIVE · SSE` / `POLL · 15s` / `OFFLINE` no cabeçalho; o relógio `SYNC:` só muda quando há dados novos (antes era um `setInterval` de 1 s).
+6. **Processos WinRM** ficam num timer separado de 60 s, só com a aba visível e a vista de detalhe aberta, com guarda contra sessões sobrepostas.
+7. O botão de sincronização do cabeçalho executa **um** `check-all` manual, a pedido do operador.
+
+Afinações em `index.html`: `window.LABCONTROL_REALTIME_FALLBACK_MS`, `window.LABCONTROL_PROCESS_REFRESH_MS`, `window.LABCONTROL_CHART_SIMULATION`. Detalhes em [**Documentação de Tempo Real**](DOCUMENTACAO_TEMPO_REAL.md).
 
 ### 4.2. Navegação Interna
 A navegação é gerenciada pela função `navigate(view, id)`:

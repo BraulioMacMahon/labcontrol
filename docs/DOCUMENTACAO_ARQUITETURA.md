@@ -18,6 +18,7 @@ O sistema é composto por quatro camadas principais:
 graph TD
     subgraph "Rede Local (Intranet)"
         A[Frontend - JS/HTML5] -->|REST API| B[Backend PHP - XAMPP]
+        B -->|SSE state.php - eventos de estado| A
         B -->|Queries| C[(MySQL Local)]
         B -->|Executa| D[Scripts PowerShell]
         D -->|WinRM| E[Hosts Alvo/Estações]
@@ -43,6 +44,18 @@ graph TD
 1.  O **Sync Service (Node.js)** monitora continuamente a tabela `hosts` e `logs` no **MySQL**.
 2.  Sempre que um status muda (ex: PC-01 ficou offline), o serviço detecta a mudança e faz o push para o **Firebase**.
 3.  Se a internet cair, o MySQL armazena a verdade local. Assim que a conexão retorna, o Node.js identifica os registros não sincronizados (`synced = 0`) e atualiza o Firebase.
+
+### 3.3. Atualização do painel em tempo real (SSE)
+O frontend **não** volta a perguntar periodicamente o estado da rede. O `Sync Service` e a API
+escrevem no MySQL; `api/state.php` calcula um fingerprint leve dessas tabelas e mantém uma
+ligação `text/event-stream` aberta com `realtime.js` (`EventSource`). Quando o fingerprint muda,
+o servidor emite um evento `state` e o `app.js` pede **apenas** os dados do grupo alterado,
+atualizando os nós do DOM afetados. Comandos continuam a ser `POST` REST.
+
+Se o stream não estiver disponível (proxy com buffering), o cliente degrada para polling de
+`action=version` com `ETag`/`304` — nunca para `check-all`, que faz ping a todos os hosts dentro
+do pedido HTTP. Detalhes, configuração e a comparação com WebSocket em
+[**Documentação de Tempo Real**](DOCUMENTACAO_TEMPO_REAL.md).
 
 ## 4. Justificativa das Escolhas Tecnológicas
 
