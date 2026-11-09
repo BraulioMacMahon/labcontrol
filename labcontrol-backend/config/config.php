@@ -401,25 +401,26 @@ function createTempPsScript($prefix, $content, $propagateExitCode = false) {
  * @param string[] $computerNames Lista já validada com isSafeComputerName().
  */
 function buildRemoteCommandScript(array $computerNames, $username, $password, $remoteCommand) {
+    // Use an explicit per-target Invoke-Command. In a workgroup, the known-good
+    // WinRM path is the target IP (also present in TrustedHosts), not a hostname
+    // whose DNS/NetBIOS resolution may differ on the XAMPP server.
     $targets = implode(',', array_map('psQuote', $computerNames));
     return
-        '$ErrorActionPreference = \'Continue\'' . "\r\n" .
+        '$ErrorActionPreference = \'Stop\'' . "\r\n" .
         '$pass = ConvertTo-SecureString -String ' . psQuote($password) . ' -AsPlainText -Force' . "\r\n" .
         '$cred = New-Object System.Management.Automation.PSCredential(' . psQuote($username) . ', $pass)' . "\r\n" .
-        '$errs = @()' . "\r\n" .
-        'try {' . "\r\n" .
-        '    Invoke-Command -ComputerName @(' . $targets . ') -Credential $cred -Authentication Negotiate -ScriptBlock { ' . $remoteCommand . ' } -ErrorAction SilentlyContinue -ErrorVariable errs | Out-Null' . "\r\n" .
-        '} catch {' . "\r\n" .
-        '    $errs += $_' . "\r\n" .
+        '$targets = @(' . $targets . ')' . "\r\n" .
+        '$failed = @()' . "\r\n" .
+        'foreach ($computer in $targets) {' . "\r\n" .
+        '    try {' . "\r\n" .
+        '        Invoke-Command -ComputerName $computer -Credential $cred -Authentication Negotiate -ScriptBlock { ' . $remoteCommand . ' } -ErrorAction Stop | Out-Null' . "\r\n" .
+        '    } catch {' . "\r\n" .
+        '        $failed += [string]$computer' . "\r\n" .
+        '        Write-Output ("ERRO: " + $_.Exception.Message)' . "\r\n" .
+        '    }' . "\r\n" .
         '}' . "\r\n" .
-        'if ($errs.Count -gt 0) {' . "\r\n" .
-        '    $failed = @($errs | ForEach-Object {' . "\r\n" .
-        '        if ($_.OriginInfo -and $_.OriginInfo.PSComputerName) { [string]$_.OriginInfo.PSComputerName }' . "\r\n" .
-        '        elseif ($_.TargetObject -is [string]) { $_.TargetObject }' . "\r\n" .
-        '        else { \'\' }' . "\r\n" .
-        '    } | Where-Object { $_ } | Select-Object -Unique)' . "\r\n" .
+        'if ($failed.Count -gt 0) {' . "\r\n" .
         '    Write-Output ("FAILED_HOSTS: " + ($failed -join \',\'))' . "\r\n" .
-        '    $errs | ForEach-Object { Write-Output ("ERRO: " + $_.Exception.Message) }' . "\r\n" .
         '    exit 1' . "\r\n" .
         '}' . "\r\n" .
         'exit 0' . "\r\n";

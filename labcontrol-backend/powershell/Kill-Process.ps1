@@ -63,6 +63,7 @@ function Invoke-RemoteCommand {
         
         if ($Credential -ne $null) {
             $sessionParams['Credential'] = $Credential
+            $sessionParams['Authentication'] = 'Negotiate'
         }
         
         $session = New-PSSession @sessionParams
