@@ -27,10 +27,10 @@ try {
     require_once __DIR__ . '/../../labcontrol-backend/includes/FirebaseIntegration.php';
     echo json_encode(['step' => '5', 'message' => 'Firebase class loaded'], JSON_PRETTY_PRINT) . "\n";
     
-    require_once __DIR__ . '/middleware/RateLimiter.php';
+    require_once __DIR__ . '/../../labcontrol-backend/middleware/RateLimiter.php';
     echo json_encode(['step' => '6', 'message' => 'RateLimiter class loaded'], JSON_PRETTY_PRINT) . "\n";
     
-    require_once __DIR__ . '/classes/Validator.php';
+    require_once __DIR__ . '/../../labcontrol-backend/classes/Validator.php';
     echo json_encode(['step' => '7', 'message' => 'Validator class loaded'], JSON_PRETTY_PRINT) . "\n";
     
     echo json_encode(['step' => '8', 'message' => 'Creating Database instance'], JSON_PRETTY_PRINT) . "\n";

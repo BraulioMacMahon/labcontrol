@@ -85,10 +85,6 @@ class LabControlApp {
         this.currentView = 'dashboard';
         this.processError = null;      // último erro da consulta de processos
         this.processesLoading = false; // evita sessões WinRM sobrepostas no polling
-        this.diagnosticHostId = '';
-        this.diagnosticResults = [];
-        this.diagnosticsRunning = false;
-        this.wolTestRunning = false;
         
         this.attachEventListeners();
         this.init();
@@ -252,206 +248,12 @@ class LabControlApp {
                     if (viewTitle) viewTitle.innerText = 'Audit Logs';
                     await this.loadAuditLogs();
                     break;
-                case 'tests':
-                    if (viewTitle) viewTitle.innerText = 'Testes e Diagnóstico';
-                    this.renderTestsView();
-                    break;
                 case 'host-detail':
                     if (params.id) await this.loadHostDetail(params.id);
                     break;
             }
         } catch (error) {
             this.notify('Erro ao atualizar view', 'error');
-        }
-    }
-
-    renderTestsView() {
-        const view = document.getElementById('view-tests');
-        if (!view) return;
-
-        const selectedHostId = this.diagnosticHostId || this.hosts[0]?.id || '';
-        const hosts = this.hosts.filter(host => host.is_active !== 0 && host.is_active !== '0' && host.is_active !== false);
-        const hostOptions = hosts.map(host => `
-            <option value="${lcEscape(host.id)}" ${String(host.id) === String(selectedHostId) ? 'selected' : ''}>
-                ${lcEscape(host.name)} — ${lcEscape(host.ip)}${host.status === 'online' ? ' · online' : ''}
-            </option>
-        `).join('');
-
-        const statusText = {
-            pending: 'Por executar', running: 'A executar', passed: 'OK', failed: 'Falhou', skipped: 'Ignorado'
-        };
-        const statusClass = {
-            pending: 'text-gray-500 bg-white/5', running: 'text-blue-300 bg-blue-500/10',
-            passed: 'text-green-300 bg-green-500/10', failed: 'text-red-300 bg-red-500/10',
-            skipped: 'text-amber-300 bg-amber-500/10'
-        };
-        const results = this.diagnosticResults.length ? this.diagnosticResults : [
-            { id: 'api', label: 'API e base de dados', status: 'pending', detail: 'Verifica a listagem de hosts.' },
-            { id: 'winrm', label: 'WinRM e consulta de processos', status: 'pending', detail: 'Consulta read-only no host selecionado.' },
-            { id: 'wol', label: 'Wake-on-LAN', status: 'pending', detail: 'Teste manual; envia um magic packet e pode ligar o host.' }
-        ];
-
-        this.safeUpdateHTML('view-tests', `
-            <div class="flex flex-col xl:flex-row xl:items-end justify-between gap-6">
-                <div>
-                    <span class="text-[10px] font-black text-blue-400 uppercase tracking-[0.25em]">Diagnóstico local</span>
-                    <h3 class="text-3xl font-extrabold text-white mt-2">Testes de conectividade</h3>
-                    <p class="text-sm text-gray-500 mt-2 max-w-2xl">Valide a API, a base de dados e a sessão WinRM antes de operar os hosts.</p>
-                </div>
-                <div class="flex flex-col sm:flex-row gap-3">
-                    <select id="diagnostic-host" ${hosts.length ? '' : 'disabled'} class="min-w-56 bg-[#101010] border border-white/10 rounded-xl px-4 py-3 text-sm text-white outline-none focus:border-blue-500">
-                        ${hosts.length ? hostOptions : '<option value="">Nenhum host registado</option>'}
-                    </select>
-                    <button data-action="run-diagnostics" ${this.diagnosticsRunning || this.wolTestRunning ? 'disabled' : ''} class="px-5 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-black uppercase tracking-widest transition-all">
-                        ${this.diagnosticsRunning ? 'A executar...' : 'Executar diagnóstico seguro'}
-                    </button>
-                </div>
-            </div>
-
-            <div class="grid grid-cols-1 lg:grid-cols-3 gap-5">
-                ${results.map(result => `
-                    <article class="glass-panel rounded-3xl p-6 min-h-40">
-                        <div class="flex items-start justify-between gap-4">
-                            <div>
-                                <p class="text-sm font-bold text-white">${lcEscape(result.label)}</p>
-                                <p class="text-xs text-gray-500 mt-2 leading-relaxed">${lcEscape(result.detail)}</p>
-                            </div>
-                            <span class="shrink-0 px-3 py-1 rounded-full text-[9px] font-black uppercase ${statusClass[result.status] || statusClass.pending}">${statusText[result.status] || statusText.pending}</span>
-                        </div>
-                        ${result.duration != null ? `<p class="text-[10px] font-mono text-gray-600 mt-5">${Number(result.duration).toFixed(0)} ms</p>` : ''}
-                    </article>
-                `).join('')}
-            </div>
-
-            <div class="glass-panel rounded-3xl p-6 flex flex-col md:flex-row md:items-center justify-between gap-5">
-                <div class="max-w-2xl">
-                    <h4 class="font-bold text-white">Teste manual Wake-on-LAN</h4>
-                    <p class="text-xs text-gray-500 mt-2">Envia um pacote para o host selecionado. O teste pode ligar o computador; não é executado pelo diagnóstico seguro.</p>
-                </div>
-                <button data-action="test-wol" ${this.wolTestRunning || this.diagnosticsRunning || !hosts.length ? 'disabled' : ''} class="px-5 py-3 rounded-xl bg-green-500/10 border border-green-500/20 hover:bg-green-500/20 disabled:opacity-50 text-green-300 text-xs font-black uppercase tracking-widest transition-all">
-                    ${this.wolTestRunning ? 'A enviar...' : 'Testar WOL'}
-                </button>
-            </div>
-
-            <div class="rounded-2xl border border-amber-500/15 bg-amber-500/[0.04] p-5 text-xs leading-relaxed text-amber-100/70">
-                Os testes seguros são somente de leitura. Shutdown, restart, killprocess e execute não são executados aqui porque alteram o estado do host ou correm comandos arbitrários.
-            </div>
-        `);
-    }
-
-    async runDiagnosticTests() {
-        if (this.diagnosticsRunning || this.wolTestRunning) return;
-        this.diagnosticHostId = document.getElementById('diagnostic-host')?.value || '';
-        this.diagnosticsRunning = true;
-        this.diagnosticResults = [
-            { id: 'api', label: 'API e base de dados', status: 'running', detail: 'A consultar a lista de hosts...' },
-            { id: 'winrm', label: 'WinRM e consulta de processos', status: 'pending', detail: 'A aguardar o teste da API.' },
-            ...(this.diagnosticResults.find(item => item.id === 'wol') ? [this.diagnosticResults.find(item => item.id === 'wol')] : [])
-        ];
-        this.renderTestsView();
-
-        const updateResult = (id, update) => {
-            const index = this.diagnosticResults.findIndex(item => item.id === id);
-            if (index >= 0) this.diagnosticResults[index] = { ...this.diagnosticResults[index], ...update };
-            else this.diagnosticResults.push({ id, ...update });
-            this.renderTestsView();
-        };
-
-        let hosts = [];
-        try {
-            const apiStart = performance.now();
-            const response = await api.getHosts();
-            if (!response?.success) throw new Error(response?.message || 'A API devolveu uma resposta inválida.');
-            hosts = response.data?.hosts || [];
-            if (!Array.isArray(hosts)) throw new Error('A API devolveu uma lista de hosts inválida.');
-            updateResult('api', {
-                label: 'API e base de dados', status: 'passed',
-                detail: `Ligação concluída; ${hosts.length} host(s) recebido(s).`,
-                duration: performance.now() - apiStart
-            });
-        } catch (error) {
-            updateResult('api', {
-                label: 'API e base de dados', status: 'failed',
-                detail: error.message || 'Falha ao consultar a API.'
-            });
-            updateResult('winrm', {
-                label: 'WinRM e consulta de processos', status: 'skipped',
-                detail: 'A consulta de hosts falhou; verifique primeiro a API/base de dados.'
-            });
-            this.diagnosticsRunning = false;
-            this.renderTestsView();
-            return;
-        }
-
-        const host = hosts.find(item => String(item.id) === String(this.diagnosticHostId)) || hosts[0];
-        if (!host) {
-            updateResult('winrm', {
-                label: 'WinRM e consulta de processos', status: 'skipped',
-                detail: 'Não há hosts registados para testar WinRM.'
-            });
-            this.diagnosticsRunning = false;
-            this.renderTestsView();
-            return;
-        }
-        this.diagnosticHostId = String(host.id);
-        updateResult('winrm', {
-            label: 'WinRM e consulta de processos', status: 'running',
-            detail: `A consultar ${host.hostname} (${host.ip})...`
-        });
-
-        const winrmStart = performance.now();
-        try {
-            const response = await api.getProcesses(host.hostname);
-            if (!response?.success) throw new Error(response?.message || 'A consulta WinRM falhou.');
-            const processes = response.data?.processes;
-            if (!Array.isArray(processes)) throw new Error('O endpoint respondeu, mas a lista de processos não é um array.');
-            updateResult('winrm', {
-                label: 'WinRM e consulta de processos', status: 'passed',
-                detail: `WinRM respondeu em ${host.hostname}; ${processes.length} processo(s) recebidos.`,
-                duration: performance.now() - winrmStart
-            });
-        } catch (error) {
-            updateResult('winrm', {
-                label: 'WinRM e consulta de processos', status: 'failed',
-                detail: error.message || 'Falha ao consultar processos por WinRM.',
-                duration: performance.now() - winrmStart
-            });
-        } finally {
-            this.diagnosticsRunning = false;
-            this.renderTestsView();
-        }
-    }
-
-    async testWakeOnLan() {
-        if (this.wolTestRunning || this.diagnosticsRunning) return;
-        this.diagnosticHostId = document.getElementById('diagnostic-host')?.value || '';
-        const host = this.hosts.find(item => String(item.id) === String(this.diagnosticHostId));
-        if (!host) {
-            this.notify('Selecione um host antes do teste WOL.', 'error');
-            return;
-        }
-        if (!host.mac) {
-            this.notify('O host selecionado não tem endereço MAC registado.', 'error');
-            return;
-        }
-        if (!confirm(`Enviar um magic packet WOL para ${host.name} (${host.ip})? O computador poderá ligar-se.`)) return;
-
-        this.wolTestRunning = true;
-        this.diagnosticResults = this.diagnosticResults.filter(item => item.id !== 'wol');
-        this.diagnosticResults.push({ id: 'wol', label: 'Wake-on-LAN', status: 'running', detail: `A enviar magic packet para ${host.ip}...` });
-        this.renderTestsView();
-        const started = performance.now();
-        try {
-            const response = await api.wakeOnLan(host.ip, host.mac);
-            if (!response?.success) throw new Error(response?.message || 'O backend não confirmou o envio do pacote.');
-            const item = this.diagnosticResults.find(result => result.id === 'wol');
-            Object.assign(item, { status: 'passed', detail: `Pacote enviado para ${host.name}. O envio não confirma que o host iniciou.`, duration: performance.now() - started });
-        } catch (error) {
-            const item = this.diagnosticResults.find(result => result.id === 'wol');
-            Object.assign(item, { status: 'failed', detail: error.message || 'Falha ao enviar o pacote WOL.', duration: performance.now() - started });
-        } finally {
-            this.wolTestRunning = false;
-            this.renderTestsView();
         }
     }
 
@@ -935,8 +737,6 @@ class LabControlApp {
                 if (a === 'shutdown-host') this.handleShutdown(h);
                 if (a === 'wol-host') this.handleWakeOnLan(ip, actionBtn.dataset.mac);
                 if (a === 'kill-process') this.handleKillProcess(h, actionBtn.dataset.pid, actionBtn.dataset.processName);
-                if (a === 'run-diagnostics') this.runDiagnosticTests();
-                if (a === 'test-wol') this.testWakeOnLan();
                 return;
             }
             if (target.id === 'modal-backdrop') this.hideHostModal();
