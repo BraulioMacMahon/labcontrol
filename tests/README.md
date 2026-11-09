@@ -2,8 +2,8 @@
 
 Porta separada para os utilitários de diagnóstico e manutenção do LabControl.
 Abre no endereço **`http://localhost/labcontrol/tests`** — sem `index.php` no URL,
-sem pasta extra ao lado do projeto — e não depende de nenhum segredo novo:
-o acesso é feito com a própria conta admin da aplicação.
+sem pasta extra ao lado do projeto — e **não exige login**: qualquer pessoa que
+consiga abrir o endereço vê o painel, as verificações e o catálogo de scripts.
 
 ## Por que é uma área separada
 
@@ -12,21 +12,15 @@ podem recriar contas. Enquanto estiveram acessíveis por URL direto eram um risc
 (derrubar a senha do admin a partir do navegador). Hoje:
 
 - o `.htaccess` nega `root/`, `backend/` e `frontend/` e serve tudo por `index.php`;
-- `index.php` exige uma sessão própria da bancada antes de mostrar ou executar qualquer coisa;
-- a sessão da bancada **não** é a sessão da aplicação: o backend continua sem cookies,
-  e um login aqui não dá acesso ao resto do LabControl (nem o contrário).
+- não há portão de login: o painel, as verificações e a execução de scripts abrem
+  sem credenciais;
+- a sessão que a bancada cria é própria desta área (cookie `labcontrol_tests`,
+  `Path=/labcontrol/tests`, `HttpOnly` e `SameSite=Lax`) e é separada da aplicação:
+  nada do backend é alterado e nenhuma tabela nova é criada.
 
-## Como entrar
-
-1. `http://localhost/labcontrol/tests` mostra apenas o portão de entrada.
-2. Informe o e-mail + senha da conta LabControl (perfil `admin`).
-3. O portão entrega o token ao `api.php?action=handshake` desta pasta, que o valida com o
-   `validateJWT()` do backend (ou replicando HS256 com o mesmo `JWT_SECRET`), confirma o
-   papel e abre uma sessão PHP chamada `labcontrol_tests`.
-4. O cookie fica restrito a `Path=/labcontrol/tests`, com `HttpOnly` e `SameSite=Lax`.
-
-Nada da aplicação é alterado: nenhum `session_start()` no backend, nenhuma tabela nova.
-O token da app é usado apenas no aperto de mão e não fica salvo nesta área.
+O que ainda está protegido: execução de scripts que escrevem ou destroem pede
+confirmação de intenção (clique «Executar»; `EXECUTAR` por escrito nos
+destrutivos) e um bilhete de uso único de 60 segundos.
 
 ## O que a página mostra
 
@@ -43,7 +37,7 @@ Modos e o que cada um exige:
 | `read` | sim, somente leitura |
 | `sensitive` | sim, mas a saída só aparece no painel (nunca em página nova) |
 | `write` | exige clique de confirmação + bilhete de 60 s |
-| `destructive` | exige digitar `EXECUTAR`, **reinserir a senha** e um bilhete de 60 s |
+| `destructive` | exige digitar `EXECUTAR` e um bilhete de 60 s |
 | `cli` | bloqueado no navegador; o painel mostra o comando `php ...` para rodar no terminal |
 
 O bilhete é assinado (HMAC), dura 60 segundos, liga o script à sessão e é consumido na
@@ -54,7 +48,7 @@ retorna uma página que explica o motivo — não executa nada.
 
 - `tests/DISABLED` (mesmo vazio) ou `TESTS_ENABLED=false` → a área responde 503 a tudo.
 - `TESTS_ALLOWED_IPS=127.0.0.1,192.168.20.0/24` → restringe por origem do pedido.
-- `TESTS_ALLOWED_ROLES=admin` (padrão) → papel exigido no aperto de mão.
+- `TESTS_ALLOWED_ROLES=admin` (padrão) → papel usado na sessão anónima da bancada (sem aperto de mão nem login).
 - `TESTS_SESSION_MINUTES=480`, `TESTS_IDLE_MINUTES=90` → validade e inatividade da sessão.
 - `TESTS_GRANT_SECONDS=60`, `TESTS_REAUTH_MAX_AGE=300` → validade do bilhete e frescura
   exigida do token usado na reconfirmação de senha.

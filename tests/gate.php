@@ -289,8 +289,28 @@ function lcTestsAuthState()
     $config = lcTestsConfig();
     $auth = $_SESSION['lc_tests'] ?? null;
 
+    // A bancada de testes não exige login: quando não há sessão, cria-se uma
+    // sessão anónima automática, de modo que o painel, as verificações e a
+    // execução de scripts abrem sem pedir credenciais. A sessão continua a ser
+    // própria desta área (cookie labcontrol_tests, Path=/labcontrol/tests) e
+    // não toca na aplicação.
     if (!is_array($auth) || empty($auth['user'])) {
-        return ['authenticated' => false, 'reason' => 'no_session'];
+        $_SESSION['lc_tests'] = [
+            'user' => [
+                'id' => null,
+                'email' => 'visitante@labcontrol.local',
+                'role' => $config['allowed_roles'][0] ?? 'admin',
+            ],
+            'roles' => $config['allowed_roles'][0] ?? 'admin',
+            'sign_in_at' => time(),
+            'last_seen' => time(),
+            'expires_at' => time() + $config['session_minutes'] * 60,
+            'ip' => lcTestsClientIp(),
+            'anonymous' => true,
+        ];
+        $_SESSION['lc_tests_csrf'] = bin2hex(random_bytes(32));
+        $_SESSION['lc_grants'] = [];
+        $auth = $_SESSION['lc_tests'];
     }
     if (!empty($auth['expires_at']) && $auth['expires_at'] < time()) {
         unset($_SESSION['lc_tests']);

@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Bancada de Testes · LabControl</title>
-    <meta name="description" content="Diagnóstico, scripts de teste e verificações de ambiente do LabControl. Acesso separado da aplicação, reservado a administradores.">
+    <meta name="description" content="Diagnóstico, scripts de teste e verificações de ambiente do LabControl. Sem login: abre diretamente na rede do laboratório.">
     <meta name="robots" content="noindex, nofollow">
     <link rel="icon" href="../labcontrol-frontend/img/logo_imetro.png" type="image/png">
     <link rel="stylesheet" href="ui/style.css">
@@ -36,12 +36,6 @@
                 <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/></svg>
                 <span>Aplicação</span>
             </a>
-            <div class="lc-session" id="lc-session" hidden>
-                <span class="lc-session-user" id="lc-session-user"></span>
-                <span class="lc-session-sep" aria-hidden="true">·</span>
-                <span class="lc-session-timer" id="lc-session-timer" title="Tempo até a sessão da bancada expirar"></span>
-                <button type="button" class="lc-session-out" data-act="logout" title="Terminar apenas esta sessão (a aplicação não é tocada)">Sair</button>
-            </div>
         </div>
     </div>
 </header>
@@ -49,44 +43,7 @@
 <main class="lc-main">
 
     <!-- ============================================================ -->
-    <!-- Porta de entrada: usa a conta LabControl, não um segredo novo -->
-    <!-- ============================================================ -->
-    <section class="lc-gate" id="lc-auth-gate" hidden>
-        <div class="lc-gate-card">
-            <p class="lc-eyebrow">Acesso reservado</p>
-            <h2 class="lc-gate-title">Entre com a sua conta LabControl</h2>
-            <p class="lc-gate-lede">
-                Esta página mexe em schemas, caches e contas do laboratório, por isso vive
-                <em>fora</em> da aplicação e exige um perfil de
-                <strong id="lc-gate-roles">admin</strong>. Não há segredo paralelo: a senha é
-                confirmada pela própria API da app: só um token válido abre a porta.
-            </p>
-
-            <form class="lc-form" id="lc-login-form" autocomplete="on">
-                <label class="lc-field">
-                    <span class="lc-field-label">Email</span>
-                    <input class="lc-input" type="email" name="email" id="lc-login-email"
-                           placeholder="admin@labcontrol.local" autocomplete="username" required>
-                </label>
-                <label class="lc-field">
-                    <span class="lc-field-label">Senha</span>
-                    <input class="lc-input" type="password" name="password" id="lc-login-password"
-                           placeholder="••••••••••••" autocomplete="current-password" required minlength="6">
-                </label>
-                <p class="lc-form-status" id="lc-login-status" role="status" aria-live="polite"></p>
-                <button type="submit" class="lc-btn lc-btn-primary lc-btn-block" id="lc-login-submit">Entrar na bancada</button>
-            </form>
-
-            <ul class="lc-gate-notes">
-                <li>O token da aplicação é reaproveitado automaticamente quando existe no navegador.</li>
-                <li>Tentativas de entrada passam pelo rate limiting e pela auditoria do <code>auth.php</code>.</li>
-                <li>Instalação nova sem contas? <code>php labcontrol-backend/setup.php --email=… --password=…</code></li>
-            </ul>
-        </div>
-    </section>
-
-    <!-- ============================================================ -->
-    <!-- Painel -->
+    <!-- Painel (sem login: abre diretamente) -->
     <!-- ============================================================ -->
     <div class="lc-panel-wrap" id="lc-app" hidden>
 
