@@ -127,7 +127,6 @@
         runTab: 'read',
         confirm: null,
         diag: { hosts: [], results: [], running: false, wolRunning: false, hostId: '' },
-        sessionTimer: null,
         autorefresh: null
     };
 
@@ -172,41 +171,6 @@
     }
 
     /** Login na API da aplicação — a bancada nunca vê a senha a não ser de passagem. */
-    function appLogin(email, password) {
-        return fetch(cfg('api_base') + '/auth.php?action=login', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-            credentials: 'same-origin',
-            body: JSON.stringify({ email: email, password: password })
-        }).then(function (res) {
-            return res.text().then(function (text) {
-                var json = null;
-                try { json = JSON.parse(text); } catch (e) { json = null; }
-                if (!json) {
-                    throw new Error(text.indexOf('<br') > -1 || text.indexOf('<b>') > -1
-                        ? 'A API respondeu em HTML (erro PHP?). Veja o cartão «API de autenticação» depois de entrar.'
-                        : 'HTTP ' + res.status + ' sem resposta utilizável da API.');
-                }
-                if (!json.success) { throw new Error(json.message || 'Credenciais inválidas'); }
-                var token = json.data && json.data.token;
-                if (!token) { throw new Error('O auth.php respondeu sem token — verificou-se o contrato do endpoint.'); }
-                return token;
-            });
-        });
-    }
-
-    /** Token já em uso na app (quando a aplicação voltar a guardar sessão no navegador). */
-    function storedAppToken() {
-        var keys = ['labcontrol_token', 'lc_token', 'token'];
-        for (var i = 0; i < keys.length; i++) {
-            try {
-                var value = window.localStorage.getItem(keys[i]) || window.sessionStorage.getItem(keys[i]);
-                if (value && value.split('.').length === 3) { return value; }
-            } catch (e) { /* armazenamento bloqueado */ }
-        }
-        return null;
-    }
-
     // ------------------------------------------------------------------
     // arranque
     // ------------------------------------------------------------------
@@ -221,20 +185,15 @@
     function boot() {
         var data = readBootstrap();
         var chain = data ? Promise.resolve(data) : api('bootstrap').catch(function (e) {
-            return { authenticated: false, reason: 'unreachable', login_error: e.message };
+            return { authenticated: true, reason: null };
         });
 
         chain.then(function (payload) {
             adopt(payload);
-            if (payload.authenticated) { render(); return null; }
-            var token = storedAppToken();
-            if (!token) { showGate(payload.login_error || payload.reason); return null; }
-            setGateStatus('Sessão da aplicação detetada — validando o token…');
-            return handshake(token).catch(function (e) {
-                showGate(payload.login_error || e.message);
-            });
+            render();
         }).catch(function (error) {
-            showGate(error && error.message ? error.message : 'Falha ao ler o estado da bancada.');
+            toast(error && error.message ? error.message : 'Falha ao ler o estado da bancada.', 'error');
+            render();
         });
     }
 
@@ -255,67 +214,6 @@
             if (!state.scripts[rel]) { state.scripts[rel] = catalog.scripts[rel]; }
         });
         state.missing = catalog.missing || [];
-    }
-
-    function handshake(token) {
-        return api('handshake', { method: 'POST', body: { token: token } }).then(function (res) {
-            adopt({
-                authenticated: true,
-                reason: null,
-                user: res.user,
-                csrf: res.csrf,
-                expires_at: res.expires_at,
-                sign_in_at: Math.floor(Date.now() / 1000),
-                catalog: res.catalog,
-                checks: res.checks
-            });
-            render();
-            toast(res.accounts_verified === false
-                ? 'Dentro da bancada — nota: o banco de dados não respondeu, a conta não foi revalidada.'
-                : 'Bem-vindo de volta, ' + (res.user && res.user.email ? res.user.email : 'admin') + '.',
-                res.accounts_verified === false ? 'error' : 'ok');
-            return res;
-        });
-    }
-
-    // ------------------------------------------------------------------
-    // porta de entrada
-    // ------------------------------------------------------------------
-    function showGate(message) {
-        doc.body.setAttribute('data-auth', 'anon');
-        $('#lc-auth-gate').hidden = false;
-        $('#lc-app').hidden = true;
-        var roles = cfg('allowed_roles', ['admin']);
-        $('#lc-gate-roles').textContent = Array.isArray(roles) ? roles.join(' ou ') : String(roles);
-        if (message) { setGateStatus(message, 'error'); }
-        var first = $('#lc-login-email');
-        if (first && !first.value) { first.focus(); }
-        stopTimers();
-    }
-
-    function setGateStatus(message, tone) {
-        var node = $('#lc-login-status');
-        if (!node) { return; }
-        node.textContent = message || '';
-        node.setAttribute('data-tone', tone || '');
-    }
-
-    function bindGate() {
-        var form = $('#lc-login-form');
-        form.addEventListener('submit', function (event) {
-            event.preventDefault();
-            var email = $('#lc-login-email').value.trim();
-            var password = $('#lc-login-password').value;
-            var button = $('#lc-login-submit');
-            button.disabled = true;
-            setGateStatus('Autenticando na aplicação…');
-            appLogin(email, password)
-                .then(function (token) { return handshake(token); })
-                .catch(function (error) {
-                    setGateStatus(error.message || 'Não foi possível entrar.', 'error');
-                })
-                .then(function () { button.disabled = false; });
-        });
     }
 
     // ------------------------------------------------------------------
@@ -348,36 +246,7 @@
         }).join('');
     }
 
-    function renderSession() {
-        var wrap = $('#lc-session');
-        var data = state.data || {};
-        if (!data.authenticated || !data.user) { wrap.hidden = true; return; }
-        wrap.hidden = false;
-        $('#lc-session-user').textContent = data.user.email + ' · ' + data.user.role;
-        tickSession();
-        if (state.sessionTimer) { clearInterval(state.sessionTimer); }
-        state.sessionTimer = setInterval(tickSession, 1000);
-    }
-
-    function tickSession() {
-        var data = state.data || {};
-        var node = $('#lc-session-timer');
-        if (!data.expires_at || !node) { return; }
-        var left = (data.expires_at - Math.floor(Date.now() / 1000)) * 1000;
-        if (left <= 0) {
-            stopTimers();
-            doc.body.setAttribute('data-auth', 'anon');
-            showGate('A sessão da bancada expirou. Entre novamente — a aplicação não foi tocada.');
-            return;
-        }
-        node.textContent = clock(left);
-        node.setAttribute('data-near', left < 120000 ? '1' : '0');
-        node.setAttribute('title', 'Restam ' + clock(left) + ' antes de a sessão da bancada expirar' +
-            (cfg('idle_minutes') ? ' (renova a cada utilização; inatividade: ' + cfg('idle_minutes') + ' min)' : ''));
-    }
-
     function stopTimers() {
-        if (state.sessionTimer) { clearInterval(state.sessionTimer); state.sessionTimer = null; }
         if (state.autorefresh) { clearInterval(state.autorefresh); state.autorefresh = null; }
     }
 
@@ -475,9 +344,9 @@
     function renderRules() {
         var rows = [
             ['A bancada é uma porta separada de <code>/labcontrol/tests</code>. A aplicação não tem menu para executar scripts, nem este local tem sessão compartilhada com ela.', 'shield'],
-            ['Entrada com a tua conta LabControl: o <code>auth.php</code> valida a senha, rate limit e auditoria; aqui fica apenas uma sessão curta guardada no cookie <code>labcontrol_tests</code>.', 'key'],
+            ['Sem login: a bancada abre direto. A sessão que usa (cookie <code>labcontrol_tests</code>) é própria desta área e é separada da aplicação.', 'key'],
             ['Os scripts não têm URL público. <code>tests/.htaccess</code> nega <code>root/</code>, <code>backend/</code> e <code>frontend/</code>, por isso tudo passa pelo portão.', 'bolt'],
-            ['Escrever precisa de um clique de confirmação; destruir precisa da senha outra vez e de um bilhete de ' + cfg('grant_seconds', 60) + ' s, de uso único.', 'alert'],
+            ['Escrever precisa de um clique de confirmação; destruir pede <b>EXECUTAR</b> por escrito e um bilhete de ' + cfg('grant_seconds', 60) + ' s, de uso único.', 'alert'],
             ['Em produção basta criar <code>tests/DISABLED</code> (ou <code>TESTS_ENABLED=false</code>) para a área responder 503 a tudo.', 'wrench']
         ];
         if (cfg('ip_restricted')) {
@@ -1134,7 +1003,7 @@
         $('#lc-confirm-list').innerHTML = bullets.map(function (text) { return '<li>' + esc(text) + '</li>'; }).join('');
 
         $('#lc-confirm-word-wrap').hidden = tier !== 'reauth';
-        $('#lc-confirm-auth').hidden = tier !== 'reauth';
+        $('#lc-confirm-auth').hidden = true; // sem login, não há senha para confirmar
         $('#lc-confirm-word-input').value = '';
         $('#lc-confirm-password').value = '';
         setConfirmStatus('', '');
@@ -1171,26 +1040,14 @@
         var go = $('#lc-confirm-go');
         go.disabled = true;
 
-        var chain;
-        if (tier === 'reauth') {
-            setConfirmStatus('Revalidando a senha na aplicação…');
-            var email = (state.data.user && state.data.user.email) || $('#lc-login-email').value.trim();
-            chain = appLogin(email, $('#lc-confirm-password').value).then(function (token) {
-                return api('grant', { method: 'POST', body: { file: rel, token: token } });
-            });
-        } else {
-            setConfirmStatus('Solicitando bilhete…');
-            chain = api('grant', { method: 'POST', body: { file: rel } });
-        }
-
-        chain.then(function (res) {
+        setConfirmStatus('Solicitando bilhete…');
+        api('grant', { method: 'POST', body: { file: rel } }).then(function (res) {
             hideConfirm();
             state.run.phase = 'idle';
             requestRun(rel, res.grant.token);
             toast('Bilhete emitido: ' + clock(res.grant.seconds * 1000) + ' de validade, um uso.', 'ok');
         }).catch(function (error) {
-            var needsFresh = error.payload && error.payload.needs_fresh_login;
-            setConfirmStatus((error.message || 'Recusado.') + (needsFresh ? ' Escreve a senha de novo.' : ''), 'error');
+            setConfirmStatus(error.message || 'Recusado.', 'error');
         }).then(function () { go.disabled = false; });
     }
 
@@ -1210,11 +1067,9 @@
 
     function render() {
         doc.body.setAttribute('data-auth', 'admin');
-        $('#lc-auth-gate').hidden = true;
         $('#lc-app').hidden = false;
         doc.body.setAttribute('data-ready', '1');
         renderEnv();
-        renderSession();
         renderHero();
         renderChecks();
         renderRules();
@@ -1298,13 +1153,6 @@
                 doc.body.removeChild(link);
             }
             else if (act === 'copy-file') { event.preventDefault(); copy('tests/' + file); }
-            else if (act === 'logout') {
-                api('logout', { method: 'POST', body: {} }).then(function () {
-                    stopTimers();
-                    showGate('Sessão encerrada.');
-                    toast('Saíste da bancada. A aplicação continua como estava.', 'ok');
-                }).catch(function (error) { toast(error.message, 'error'); });
-            }
             else if (act === 'run-diag') { runDiagnostics(); }
             else if (act === 'test-wol') { testWol(); }
         });
@@ -1367,7 +1215,6 @@
     }
 
     function start() {
-        bindGate();
         bindEvents();
         boot();
         var foot = $('#lc-foot-build');

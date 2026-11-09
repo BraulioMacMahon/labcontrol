@@ -71,20 +71,9 @@ if ($action !== null && $action !== '') {
         exit;
     }
 
-    // Autenticação — o output dos scripts nunca é público.
-    $auth = lcTestsAuthState();
-    if (empty($auth['authenticated'])) {
-        lcTestsSendHeaders('json');
-        http_response_code(401);
-        echo json_encode([
-            'success' => false,
-            'status' => 401,
-            'message' => 'Sessão da bancada terminada ou inexistente.',
-            'reason' => $auth['reason'] ?? 'no_session',
-            'login' => './',
-        ], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
-        exit;
-    }
+    // Sem login na bancada: lcTestsAuthState() abre uma sessão anónima quando
+    // não há nenhuma, pelo contrário a execução segue sem exigir credenciais.
+    lcTestsAuthState();
 
     // Degrau extra para scripts que escrevem/destróem: bilhete de uso único.
     if (lcTestsNeedsGrant($meta)) {
@@ -161,15 +150,14 @@ if ($action !== null && $action !== '') {
 // -----------------------------------------------------------------
 // 3. O painel
 // -----------------------------------------------------------------
-$auth = lcTestsAuthState();
-$authenticated = !empty($auth['authenticated']);
+$auth = lcTestsAuthState(); // sessão anónima automática quando não há login
 $force = isset($_GET['checks']) && $_GET['checks'] === 'fresh';
-$checks = $authenticated ? lcTestsChecksCached($force) : null;
-$catalog = $authenticated ? lcTestsCatalog() : null;
+$checks = lcTestsChecksCached($force);
+$catalog = lcTestsCatalog();
 
 $bootstrap = [
-    'authenticated' => !empty($auth['authenticated']),
-    'reason' => $auth['reason'] ?? null,
+    'authenticated' => true,
+    'reason' => null,
     'user' => $auth['user'] ?? null,
     'expires_at' => $auth['expires_at'] ?? null,
     'sign_in_at' => $auth['sign_in_at'] ?? null,
@@ -195,9 +183,9 @@ $bootstrap = [
         'requested' => $view,
     ],
     'modes' => lcTestsModeLabels(),
-    // Antes do login não se lista nada: os nomes dos utilitários, os caminhos e
-    // as descrições já diriam demasiado a alguém que apanhasse o URL por engano.
-    'catalog' => $authenticated ? $catalog : null,
+    // Sem login: o catálogo e as verificações estão visíveis para qualquer
+    // pessoa que abra a bancada.
+    'catalog' => $catalog,
     'checks' => $checks,
 ];
 

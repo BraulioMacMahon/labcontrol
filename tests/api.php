@@ -103,13 +103,6 @@ switch ($action) {
             'modes' => lcTestsModeLabels(),
         ];
 
-        if (empty($auth['authenticated'])) {
-            $payload['catalog'] = null;
-            $payload['checks'] = null;
-            $payload['note'] = 'Catálogo e verificações ficam visíveis depois de entrar.';
-            lcTestsReply($payload);
-        }
-
         $payload['catalog'] = lcTestsCatalog();
         $payload['checks'] = lcTestsChecksCached(isset($_GET['checks']) && $_GET['checks'] === 'fresh');
         lcTestsReply($payload);
@@ -117,10 +110,7 @@ switch ($action) {
 
     // -----------------------------------------------------------------
     case 'checks':
-        $auth = lcTestsAuthState();
-        if (empty($auth['authenticated'])) {
-            lcTestsFail('Sessão terminada — entre novamente para rever o estado do sistema.', 401);
-        }
+        lcTestsAuthState(); // sessão anónima automática quando não há login
         lcTestsReply([
             'success' => true,
             'checks' => lcTestsChecksCached($method === 'GET' && ($_GET['fresh'] ?? '') === '1'),
@@ -129,10 +119,7 @@ switch ($action) {
 
     // -----------------------------------------------------------------
     case 'script':
-        $auth = lcTestsAuthState();
-        if (empty($auth['authenticated'])) {
-            lcTestsFail('Sessão terminada.', 401, ['reason' => $auth['reason'] ?? 'no_session']);
-        }
+        lcTestsAuthState(); // sessão anónima automática quando não há login
         $rel = (string)($_GET['file'] ?? '');
         $resolved = lcTestsResolveView($rel);
         if ($resolved === null) {
@@ -243,10 +230,7 @@ switch ($action) {
 
     // -----------------------------------------------------------------
     case 'grant':
-        $auth = lcTestsAuthState();
-        if (empty($auth['authenticated'])) {
-            lcTestsFail('Sessão terminada — entre novamente para executar este script.', 401, ['reason' => $auth['reason'] ?? 'no_session']);
-        }
+        $auth = lcTestsAuthState(); // sessão anónima automática quando não há login
         if ($method !== 'POST') {
             lcTestsFail('Concessão de bilhete exige POST.', 405);
         }
@@ -267,31 +251,10 @@ switch ($action) {
             lcTestsFail('Este script não precisa de bilhete — executa direto.', 400, ['confirm_tier' => $tier]);
         }
 
-        // «reauth»: a conta tem de provar a senha AGORA. O token tem de ter
-        // sido emitido há pouco tempo (iat fresco), o que impossibilita reusar o
-        // token guardado na sessão da bancada para validar operações destrutivas.
-        if ($tier === 'reauth') {
-            $fresh = lcTestsValidateAppToken((string)($body['token'] ?? ''));
-            if (!is_array($fresh) || isset($fresh['error'])) {
-                lcTestsFail('Confirmação recusada: ' . ($fresh['error'] ?? 'token inválido') , 403);
-            }
-            $age = time() - (int)($fresh['iat'] ?? 0);
-            if ($age > $config['reauth_max_age']) {
-                lcTestsFail(
-                    'Este script exige uma autenticação fresca: a sessão usada foi aberta há '
-                        . number_format($age / 60) . ' min (limite: ' . number_format($config['reauth_max_age'] / 60) . ' min).',
-                    403,
-                    ['needs_fresh_login' => true]
-                );
-            }
-            if (strcasecmp((string)($fresh['email'] ?? ''), (string)($auth['user']['email'] ?? '')) !== 0) {
-                lcTestsFail('A confirmação foi feita com outra conta (' . ($fresh['email'] ?? '?') . ').', 403);
-            }
-            if (!lcTestsRoleAllowed((string)($fresh['role'] ?? ''))) {
-                lcTestsFail('A conta usada para confirmar não tem o perfil exigido.', 403);
-            }
-        }
-
+        // Sem login na bancada: não há senha para revalidar. O bilhete de
+        // uso único ainda é exigido (e consumido) para scripts que escrevem
+        // ou destroem — a confirmação de intenção fica no painel (EXECUTAR
+        // para destrutivos, clique «Executar» para escrita).
         $grant = lcTestsGrantIssue($resolved['rel']);
         error_log(sprintf(
             'LabControl bancada: bilhete para %s concedido a %s (%s) a partir de %s',

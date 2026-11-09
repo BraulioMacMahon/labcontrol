@@ -6,7 +6,7 @@
 # despejam logs. O acesso é deliberadamente SEPARADO da aplicação:
 #
 #   • o ponto de entrada é sempre index.php, que aplica o portão (gate.php):
-#     kill-switch → rede → sessão própria → bilhete para scripts que escrevem;
+#     kill-switch → rede → sessão automática (sem login) → bilhete para scripts que escrevem;
 #   • os utilitários em root/, backend/ e frontend/ não têm URL público
 #     (ver os .htaccess dentro de cada uma dessas pastas);
 #   • para desligar a área numa instalação de produção: crie um arquivo
